@@ -1,0 +1,5 @@
+Flask
+requests
+python-docx
+python-pptx
+openpyxl
