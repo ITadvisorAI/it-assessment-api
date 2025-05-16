@@ -11,6 +11,13 @@ BASE_DIR = "temp_sessions"
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
+# Allowed file types
+ALLOWED_TYPES = {"asset_inventory", "gap_working", "intake", "log"}
+
+@app.route('/', methods=['GET'])
+def health_check():
+    return "✅ IT Assessment API is up and running", 200
+
 @app.route('/receive_request', methods=['POST'])
 def receive_request():
     try:
@@ -27,9 +34,17 @@ def receive_request():
         logging.info(f"📡 Webhook: {webhook}")
         logging.info(f"📂 Files received: {len(files)}")
 
+        # Validation
         if not session_id or not webhook or not files:
             logging.error("❌ Missing required fields in request")
             return jsonify({"message": "Missing required fields"}), 400
+
+        for f in files:
+            if 'file_name' not in f or 'file_url' not in f or 'type' not in f:
+                logging.error("❌ Malformed file entry in 'files' list")
+                return jsonify({"message": "Malformed file entry"}), 400
+            if f['type'] not in ALLOWED_TYPES:
+                logging.warning(f"⚠️ Unknown file type detected: {f['type']}")
 
         session_folder = os.path.join(BASE_DIR, f"Temp_{session_id}")
         os.makedirs(session_folder, exist_ok=True)
@@ -40,6 +55,7 @@ def receive_request():
             target=process_assessment,
             args=(session_id, email, files, webhook, session_folder)
         )
+        thread.daemon = True
         thread.start()
         logging.info("🚀 Background thread for assessment started successfully")
 
