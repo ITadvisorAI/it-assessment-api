@@ -13,56 +13,66 @@ def download_file(url, dest_path):
         print(f"🔴 Failed to download {url}: {e}")
 
 def process_assessment(session_id, email, files, webhook, session_folder):
-    print("⚙️ Starting assessment process")
-
-    # Download all files
-    for f in files:
-        file_path = os.path.join(session_folder, f['file_name'])
-        download_file(f['file_url'], file_path)
-
-    # Identify asset_inventory or gap_working file
-    inventory_file = next((f for f in files if f['type'] in ['asset_inventory', 'gap_working']), None)
-    if not inventory_file:
-        print("❌ No inventory file found")
-        send_result(webhook, session_id, "it_assessment", "error", "Missing asset inventory file")
-        return
-
-    # File generation
-    updated_xlsx = f"Assessment_GAP_Working_{session_id}.xlsx"
-    updated_path = os.path.join(session_folder, updated_xlsx)
     try:
-        shutil.copy("templates/assessment_template.xlsx", updated_path)
-        print(f"✅ Created: {updated_path}")
-    except Exception as e:
-        print(f"🔴 Failed to create XLSX: {e}")
+        print(f"🔧 Thread started for session: {session_id}")
+        print(f"🔍 Files received: {[f['file_name'] for f in files]}")
 
-    pptx_name = f"Assessment_Summary_Deck_{session_id}.pptx"
-    pptx_path = os.path.join(session_folder, pptx_name)
-    try:
-        prs = Presentation("templates/summary_deck_template.pptx")
-        prs.slides[0].shapes.title.text = "Assessment Summary"
-        prs.slides[0].placeholders[1].text = f"Session ID: {session_id}"
-        prs.save(pptx_path)
-        print(f"✅ Created: {pptx_path}")
-    except Exception as e:
-        print(f"🔴 Failed to create PPTX: {e}")
+        os.makedirs(session_folder, exist_ok=True)
+        print(f"📁 Created session folder: {session_folder}")
 
-    # Send result to webhook
-    try:
-        send_result(
-            webhook,
-            session_id,
-            "it_assessment",
-            "complete",
-            "",
-            updated_xlsx,
-            f"https://it-assessment-api.onrender.com/files/Temp_{session_id}/{updated_xlsx}",
-            pptx_name,
-            f"https://it-assessment-api.onrender.com/files/Temp_{session_id}/{pptx_name}"
-        )
-        print("✅ Result sent to webhook")
+        # Step 1: Download all files
+        for f in files:
+            file_path = os.path.join(session_folder, f['file_name'])
+            print(f"📝 Downloading: {f['file_name']} from {f['file_url']}")
+            download_file(f['file_url'], file_path)
+
+        # Step 2: Identify input inventory file
+        inventory_file = next((f for f in files if f['type'] in ['asset_inventory', 'gap_working']), None)
+        if not inventory_file:
+            print("❌ No inventory file found")
+            send_result(webhook, session_id, "it_assessment", "error", "Missing asset inventory file")
+            return
+
+        # Step 3: Create updated Excel file
+        updated_xlsx = f"Assessment_GAP_Working_{session_id}.xlsx"
+        updated_path = os.path.join(session_folder, updated_xlsx)
+        try:
+            shutil.copy("templates/assessment_template.xlsx", updated_path)
+            print(f"✅ Created Excel file: {updated_path}")
+        except Exception as e:
+            print(f"🔴 Failed to create XLSX: {e}")
+
+        # Step 4: Create PowerPoint summary
+        pptx_name = f"Assessment_Summary_Deck_{session_id}.pptx"
+        pptx_path = os.path.join(session_folder, pptx_name)
+        try:
+            prs = Presentation("templates/summary_deck_template.pptx")
+            prs.slides[0].shapes.title.text = "Assessment Summary"
+            prs.slides[0].placeholders[1].text = f"Session: {session_id}"
+            prs.save(pptx_path)
+            print(f"✅ Created PowerPoint file: {pptx_path}")
+        except Exception as e:
+            print(f"🔴 Failed to create PPTX: {e}")
+
+        # Step 5: POST results to webhook
+        try:
+            send_result(
+                webhook,
+                session_id,
+                "it_assessment",
+                "complete",
+                "",
+                updated_xlsx,
+                f"https://it-assessment-api.onrender.com/files/Temp_{session_id}/{updated_xlsx}",
+                pptx_name,
+                f"https://it-assessment-api.onrender.com/files/Temp_{session_id}/{pptx_name}"
+            )
+            print("📤 Sent results to webhook successfully")
+        except Exception as e:
+            print(f"🔴 Failed to post to webhook: {e}")
+
     except Exception as e:
-        print(f"🔴 Failed to post to webhook: {e}")
+        print(f"💥 Unhandled exception in assessment process: {e}")
 
 def send_result(webhook, session_id, module, status, message, file1=None, url1=None, file2=None, url2=None):
     payload = {
@@ -79,9 +89,9 @@ def send_result(webhook, session_id, module, status, message, file1=None, url1=N
         payload["file_2_name"] = file2
         payload["file_2_url"] = url2
 
-    print(f"📤 Posting to webhook: {webhook}")
+    print(f"📤 Posting result to webhook: {webhook}")
     try:
         response = requests.post(webhook, json=payload)
         print(f"🔁 Webhook response: {response.status_code} - {response.text}")
     except Exception as e:
-        print(f"🔴 Error sending to webhook: {e}")
+        print(f"🔴 Error posting to webhook: {e}")
