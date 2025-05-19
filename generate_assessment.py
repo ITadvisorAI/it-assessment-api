@@ -72,6 +72,9 @@ def process_assessment(session_id, email, files, webhook, session_folder):
         print(f"📦 Files payload: {files}")
         os.makedirs(session_folder, exist_ok=True)
 
+        # Normalize folder name to prevent double "Temp_"
+        folder_name = session_id if session_id.startswith("Temp_") else f"Temp_{session_id}"
+
         for f in files:
             file_path = os.path.join(session_folder, f['file_name'])
             download_file(f['file_url'], file_path)
@@ -139,10 +142,10 @@ def process_assessment(session_id, email, files, webhook, session_folder):
 
         # Send to webhook
         files_to_send = {
-            os.path.basename(hw_output_path): f"https://it-assessment-api.onrender.com/files/Temp_{session_id}/{os.path.basename(hw_output_path)}",
-            os.path.basename(sw_output_path): f"https://it-assessment-api.onrender.com/files/Temp_{session_id}/{os.path.basename(sw_output_path)}",
-            os.path.basename(docx_output): f"https://it-assessment-api.onrender.com/files/Temp_{session_id}/{os.path.basename(docx_output)}",
-            os.path.basename(pptx_output): f"https://it-assessment-api.onrender.com/files/Temp_{session_id}/{os.path.basename(pptx_output)}",
+            os.path.basename(hw_output_path): f"https://it-assessment-api.onrender.com/files/{folder_name}/{os.path.basename(hw_output_path)}",
+            os.path.basename(sw_output_path): f"https://it-assessment-api.onrender.com/files/{folder_name}/{os.path.basename(sw_output_path)}",
+            os.path.basename(docx_output): f"https://it-assessment-api.onrender.com/files/{folder_name}/{os.path.basename(docx_output)}",
+            os.path.basename(pptx_output): f"https://it-assessment-api.onrender.com/files/{folder_name}/{os.path.basename(pptx_output)}",
         }
         send_result(webhook, session_id, "it_assessment", "complete", "", files_to_send)
 
