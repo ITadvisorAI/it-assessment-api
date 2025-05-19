@@ -2,6 +2,7 @@ from flask import Flask, request, send_from_directory, jsonify
 import os
 import threading
 import logging
+import re
 from generate_assessment import process_assessment
 
 # Initialize Flask app
@@ -14,6 +15,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 # Allowed file types
 ALLOWED_TYPES = {"asset_inventory", "gap_working", "intake", "log"}
 
+def sanitize_session_id(session_id):
+    return re.sub(r"[^\w\-]", "_", session_id)
+
 @app.route('/', methods=['GET'])
 def health_check():
     return "✅ IT Assessment API is up and running", 200
@@ -22,7 +26,7 @@ def health_check():
 def receive_request():
     try:
         data = request.get_json()
-        logging.info("📥 Received POST /receive_request with payload")
+        logging.info("📥 Received POST /receive_request")
 
         session_id = data.get("session_id")
         email = data.get("email")
@@ -46,14 +50,15 @@ def receive_request():
             if f['type'] not in ALLOWED_TYPES:
                 logging.warning(f"⚠️ Unknown file type detected: {f['type']}")
 
-        session_folder = os.path.join(BASE_DIR, f"Temp_{session_id}")
+        safe_session_id = sanitize_session_id(session_id)
+        session_folder = os.path.join(BASE_DIR, f"Temp_{safe_session_id}")
         os.makedirs(session_folder, exist_ok=True)
-        logging.info(f"📁 Created/verified session folder at: {session_folder}")
+        logging.info(f"📁 Created or verified session folder: {session_folder}")
 
-        # Start async processing
+        # Start async processing — no need to pass session_folder (it's handled in generate_assessment.py)
         thread = threading.Thread(
             target=process_assessment,
-            args=(session_id, email, files, webhook, session_folder)
+            args=(session_id, email, files, webhook)
         )
         thread.daemon = True
         thread.start()
@@ -79,4 +84,4 @@ def serve_file(filename):
 if __name__ == '__main__':
     os.makedirs(BASE_DIR, exist_ok=True)
     logging.info("🚦 IT Assessment Flask server starting...")
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    app.run(debug=False, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
