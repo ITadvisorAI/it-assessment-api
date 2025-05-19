@@ -19,7 +19,7 @@ ALLOWED_TYPES = {"asset_inventory", "gap_working", "intake", "log"}
 def health_check():
     return "✅ IT Assessment API is up and running", 200
 
-# === Receive POST Request from GPT1 ===
+# === Receive Request from GPT1 ===
 @app.route('/receive_request', methods=['POST'])
 def receive_request():
     try:
@@ -74,7 +74,7 @@ def receive_request():
         logging.exception("🔥 Exception occurred in /receive_request")
         return jsonify({"error": str(e)}), 500
 
-# === Serve Generated Files via /files/... ===
+# === Serve Generated Files from /files/Temp_<session_id>/filename ===
 @app.route('/files/<path:filename>', methods=['GET'])
 def serve_file(filename):
     try:
