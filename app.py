@@ -11,7 +11,7 @@ BASE_DIR = "temp_sessions"
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-# Allowed file types (can be extended)
+# Allowed file types
 ALLOWED_TYPES = {"asset_inventory", "gap_working", "intake", "log"}
 
 @app.route('/', methods=['GET'])
@@ -22,7 +22,7 @@ def health_check():
 def receive_request():
     try:
         data = request.get_json()
-        logging.info("📥 Received POST /receive_request")
+        logging.info("📥 Received POST /receive_request with payload")
 
         session_id = data.get("session_id")
         email = data.get("email")
@@ -48,21 +48,21 @@ def receive_request():
 
         session_folder = os.path.join(BASE_DIR, f"Temp_{session_id}")
         os.makedirs(session_folder, exist_ok=True)
-        logging.info(f"📁 Session folder verified/created at: {session_folder}")
+        logging.info(f"📁 Created/verified session folder at: {session_folder}")
 
-        # Start background assessment
+        # Start async processing
         thread = threading.Thread(
             target=process_assessment,
             args=(session_id, email, files, webhook, session_folder)
         )
         thread.daemon = True
         thread.start()
-        logging.info("🚀 Background thread started for assessment")
+        logging.info("🚀 Background thread for assessment started successfully")
 
         return jsonify({"message": "Assessment started"}), 200
 
     except Exception as e:
-        logging.exception("🔥 Error in /receive_request")
+        logging.exception("🔥 Error occurred in /receive_request")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/files/<path:filename>', methods=['GET'])
@@ -79,4 +79,5 @@ def serve_file(filename):
 if __name__ == '__main__':
     os.makedirs(BASE_DIR, exist_ok=True)
     logging.info("🚦 IT Assessment Flask server starting...")
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(debug=False, host="0.0.0.0", port=port)
