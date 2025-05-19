@@ -72,8 +72,9 @@ def process_assessment(session_id, email, files, webhook, session_folder):
         print(f"📦 Files payload: {files}")
         os.makedirs(session_folder, exist_ok=True)
 
-        # Normalize folder name to prevent double "Temp_"
-        folder_name = session_id if session_id.startswith("Temp_") else f"Temp_{session_id}"
+        # ✅ Force clean folder name (always exactly one Temp_ prefix)
+        raw_id = session_id[5:] if session_id.startswith("Temp_") else session_id
+        folder_name = f"Temp_{raw_id}"
 
         for f in files:
             file_path = os.path.join(session_folder, f['file_name'])
@@ -140,7 +141,7 @@ def process_assessment(session_id, email, files, webhook, session_folder):
             print(f"🔴 PPTX failed: {e}")
             traceback.print_exc()
 
-        # Send to webhook
+        # ✅ Correct public file URLs using normalized folder name
         files_to_send = {
             os.path.basename(hw_output_path): f"https://it-assessment-api.onrender.com/files/{folder_name}/{os.path.basename(hw_output_path)}",
             os.path.basename(sw_output_path): f"https://it-assessment-api.onrender.com/files/{folder_name}/{os.path.basename(sw_output_path)}",
