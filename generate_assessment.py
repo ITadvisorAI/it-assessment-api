@@ -1,4 +1,4 @@
-import requests, os
+import requests, os, traceback
 import matplotlib.pyplot as plt
 from docx import Document
 from docx.shared import Inches
@@ -17,6 +17,7 @@ def download_file(url, dest_path):
         print(f"✅ Downloaded: {dest_path}")
     except Exception as e:
         print(f"🔴 Failed to download {url}: {e}")
+        traceback.print_exc()
 
 def send_result(webhook, session_id, module, status, message, files):
     payload = {
@@ -35,6 +36,7 @@ def send_result(webhook, session_id, module, status, message, files):
         print(f"🔁 Webhook responded with: {response.status_code} - {response.text}")
     except Exception as e:
         print(f"🔴 Webhook error: {e}")
+        traceback.print_exc()
 
 def generate_tier_chart(ws, output_path):
     tier_col_idx = None
@@ -67,6 +69,7 @@ def generate_tier_chart(ws, output_path):
 def process_assessment(session_id, email, files, webhook, session_folder):
     try:
         print(f"🔧 Starting assessment for session: {session_id}")
+        print(f"📦 Files payload: {files}")
         os.makedirs(session_folder, exist_ok=True)
 
         for f in files:
@@ -82,9 +85,9 @@ def process_assessment(session_id, email, files, webhook, session_folder):
         sw_output_path = os.path.join(session_folder, sw_output)
 
         docx_template = "templates/IT_Current_Status_Assesment_Template.docx"
-        docx_output = os.path.join(session_folder, f"IT_Current_Status_Assessment_Report.docx")
+        docx_output = os.path.join(session_folder, "IT_Current_Status_Assessment_Report.docx")
         pptx_template = "templates/IT_Infrastructure_Assessment_Report.pptx"
-        pptx_output = os.path.join(session_folder, f"IT_Current_Status_Executive_Report.pptx")
+        pptx_output = os.path.join(session_folder, "IT_Current_Status_Executive_Report.pptx")
         chart_path = os.path.join(session_folder, "tier_distribution.png")
 
         try:
@@ -95,6 +98,7 @@ def process_assessment(session_id, email, files, webhook, session_folder):
             print(f"✅ HW GAP file: {hw_output_path}")
         except Exception as e:
             print(f"🔴 HW GAP failed: {e}")
+            traceback.print_exc()
 
         try:
             wb = load_workbook(sw_template)
@@ -102,6 +106,7 @@ def process_assessment(session_id, email, files, webhook, session_folder):
             print(f"✅ SW GAP file: {sw_output_path}")
         except Exception as e:
             print(f"🔴 SW GAP failed: {e}")
+            traceback.print_exc()
 
         try:
             doc = Document(docx_template)
@@ -113,6 +118,7 @@ def process_assessment(session_id, email, files, webhook, session_folder):
             print(f"✅ DOCX generated: {docx_output}")
         except Exception as e:
             print(f"🔴 DOCX failed: {e}")
+            traceback.print_exc()
 
         try:
             ppt = Presentation(pptx_template)
@@ -129,6 +135,7 @@ def process_assessment(session_id, email, files, webhook, session_folder):
             print(f"✅ PPTX generated: {pptx_output}")
         except Exception as e:
             print(f"🔴 PPTX failed: {e}")
+            traceback.print_exc()
 
         # Send to webhook
         files_to_send = {
@@ -141,3 +148,4 @@ def process_assessment(session_id, email, files, webhook, session_folder):
 
     except Exception as e:
         print(f"💥 Unhandled error in process_assessment: {e}")
+        traceback.print_exc()
