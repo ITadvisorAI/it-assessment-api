@@ -2,7 +2,6 @@ from flask import Flask, request, send_from_directory, jsonify
 import os
 import threading
 import logging
-import re
 from generate_assessment import process_assessment
 
 # Initialize Flask app
@@ -12,11 +11,8 @@ BASE_DIR = "temp_sessions"
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-# Allowed file types
+# Allowed file types (can be extended)
 ALLOWED_TYPES = {"asset_inventory", "gap_working", "intake", "log"}
-
-def sanitize_session_id(session_id):
-    return re.sub(r"[^\w\-]", "_", session_id)
 
 @app.route('/', methods=['GET'])
 def health_check():
@@ -50,24 +46,23 @@ def receive_request():
             if f['type'] not in ALLOWED_TYPES:
                 logging.warning(f"⚠️ Unknown file type detected: {f['type']}")
 
-        safe_session_id = sanitize_session_id(session_id)
-        session_folder = os.path.join(BASE_DIR, f"Temp_{safe_session_id}")
+        session_folder = os.path.join(BASE_DIR, f"Temp_{session_id}")
         os.makedirs(session_folder, exist_ok=True)
-        logging.info(f"📁 Created or verified session folder: {session_folder}")
+        logging.info(f"📁 Session folder verified/created at: {session_folder}")
 
-        # Start async processing — no need to pass session_folder (it's handled in generate_assessment.py)
+        # Start background assessment
         thread = threading.Thread(
             target=process_assessment,
-            args=(session_id, email, files, webhook)
+            args=(session_id, email, files, webhook, session_folder)
         )
         thread.daemon = True
         thread.start()
-        logging.info("🚀 Background thread for assessment started successfully")
+        logging.info("🚀 Background thread started for assessment")
 
         return jsonify({"message": "Assessment started"}), 200
 
     except Exception as e:
-        logging.exception("🔥 Error occurred in /receive_request")
+        logging.exception("🔥 Error in /receive_request")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/files/<path:filename>', methods=['GET'])
@@ -84,4 +79,4 @@ def serve_file(filename):
 if __name__ == '__main__':
     os.makedirs(BASE_DIR, exist_ok=True)
     logging.info("🚦 IT Assessment Flask server starting...")
-    app.run(debug=False, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    app.run(debug=True, host="0.0.0.0", port=5000)
