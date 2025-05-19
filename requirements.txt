@@ -1,5 +1,6 @@
-Flask
+flask
 requests
 python-docx
-python-pptx
 openpyxl
+python-pptx
+matplotlib
