@@ -16,7 +16,9 @@ def download_file(url, dest_path):
     except Exception as e:
         print(f"🔴 Failed to download {url}: {e}")
 
-def send_result(webhook, session_id, module, status, message, file1=None, url1=None, file2=None, url2=None):
+def send_result(webhook, session_id, module, status, message,
+                file1=None, url1=None, file2=None, url2=None,
+                file3=None, url3=None, file4=None, url4=None):
     payload = {
         "session_id": session_id,
         "gpt_module": module,
@@ -30,6 +32,12 @@ def send_result(webhook, session_id, module, status, message, file1=None, url1=N
     if file2 and url2:
         payload["file_2_name"] = file2
         payload["file_2_url"] = url2
+    if file3 and url3:
+        payload["file_3_name"] = file3
+        payload["file_3_url"] = url3
+    if file4 and url4:
+        payload["file_4_name"] = file4
+        payload["file_4_url"] = url4
 
     print(f"📤 Sending result to webhook: {webhook}")
     try:
@@ -72,10 +80,10 @@ def process_assessment(session_id, email, files, webhook, session_folder):
             download_file(f['file_url'], file_path)
 
         # Step 2: Update HWGapAnalysis and SWGapAnalysis
-        gap_template = "templates/HWGapAnalysis.xlsx"
+        hw_template = "templates/HWGapAnalysis.xlsx"
         hw_output = os.path.join(session_folder, "HWGapAnalysis.xlsx")
-        if os.path.exists(gap_template):
-            wb = load_workbook(gap_template)
+        if os.path.exists(hw_template):
+            wb = load_workbook(hw_template)
             ws = wb.active
             ws["A1"] = f"Processed by IT Assessment for session {session_id}"
             wb.save(hw_output)
@@ -126,15 +134,19 @@ def process_assessment(session_id, email, files, webhook, session_folder):
         except Exception as e:
             print(f"🔴 Failed to generate PPTX: {e}")
 
-        # Step 6: Send result to webhook
+        # Step 6: Send all files to webhook
         send_result(
             webhook,
             session_id,
             "it_assessment",
             "complete",
-            "",
+            "Assessment completed. 4 output files generated.",
             "HWGapAnalysis.xlsx",
             f"https://it-assessment-api.onrender.com/files/Temp_{session_id}/HWGapAnalysis.xlsx",
+            "SWGapAnalysis.xlsx",
+            f"https://it-assessment-api.onrender.com/files/Temp_{session_id}/SWGapAnalysis.xlsx",
+            "IT_Current_Status_Assessment_Report.docx",
+            f"https://it-assessment-api.onrender.com/files/Temp_{session_id}/IT_Current_Status_Assessment_Report.docx",
             "IT_Current_Status_Executive_Report.pptx",
             f"https://it-assessment-api.onrender.com/files/Temp_{session_id}/IT_Current_Status_Executive_Report.pptx"
         )
