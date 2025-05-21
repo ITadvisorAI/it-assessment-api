@@ -1,4 +1,6 @@
-import requests, os, traceback
+import os
+import traceback
+import requests
 import matplotlib.pyplot as plt
 from docx import Document
 from docx.shared import Inches
@@ -15,6 +17,7 @@ TEMPLATES = {
     "pptx": "templates/IT_Infrastructure_Assessment_Report.pptx"
 }
 GENERATE_API_URL = "https://docx-generator-api.onrender.com/generate_assessment"
+PUBLIC_BASE_URL = "https://it-assessment-api.onrender.com/files"
 
 def download_file(url, dest_path):
     try:
@@ -100,25 +103,30 @@ def process_assessment(session_id, email, files, webhook, session_folder):
 
         folder_name = session_id if session_id.startswith("Temp_") else f"Temp_{session_id}"
 
+        # Filter only the required types
         file_dict = {f['type']: f for f in files if f.get('type') in REQUIRED_FILE_TYPES}
         missing = REQUIRED_FILE_TYPES - file_dict.keys()
         if missing:
             raise ValueError(f"Missing required file types: {', '.join(missing)}")
 
+        # Check all required templates exist
         for key, path in TEMPLATES.items():
             if not os.path.exists(path):
                 raise FileNotFoundError(f"Missing template: {path}")
 
+        # Download all files
         for f in files:
             file_path = os.path.join(session_folder, f['file_name'])
             download_file(f['file_url'], file_path)
 
+        # Define output paths
         hw_output = os.path.join(session_folder, f"HWGapAnalysis_{session_id}.xlsx")
         sw_output = os.path.join(session_folder, f"SWGapAnalysis_{session_id}.xlsx")
         docx_output = os.path.join(session_folder, "IT_Current_Status_Assessment_Report.docx")
         pptx_output = os.path.join(session_folder, "IT_Current_Status_Executive_Report.pptx")
         chart_path = os.path.join(session_folder, "tier_distribution.png")
 
+        # HW GAP Analysis
         try:
             wb = load_workbook(TEMPLATES["hw"])
             ws = wb["GAP_Working"] if "GAP_Working" in wb.sheetnames else wb.active
@@ -129,6 +137,7 @@ def process_assessment(session_id, email, files, webhook, session_folder):
             print(f"🔴 HW GAP failed: {e}")
             traceback.print_exc()
 
+        # SW GAP Analysis
         try:
             wb = load_workbook(TEMPLATES["sw"])
             wb.save(sw_output)
@@ -137,26 +146,30 @@ def process_assessment(session_id, email, files, webhook, session_folder):
             print(f"🔴 SW GAP failed: {e}")
             traceback.print_exc()
 
+        # Generate DOCX and PPTX via external API
         try:
             score_summary = "Excellent: 20%, Advanced: 40%, Standard: 30%, Obsolete: 10%"
             recommendations = "Decommission Tier 1 servers and move Tier 2 apps to cloud."
             key_findings = "Some business-critical workloads are hosted on obsolete hardware."
-            gen_result = call_generate_api(session_id, score_summary, recommendations, key_findings)
 
+            gen_result = call_generate_api(session_id, score_summary, recommendations, key_findings)
             if 'docx_url' in gen_result:
                 docx_output = gen_result['docx_url']
             if 'pptx_url' in gen_result:
                 pptx_output = gen_result['pptx_url']
-
         except Exception as e:
             print(f"🔴 External DOCX/PPTX generation failed: {e}")
             traceback.print_exc()
 
+        # Build file URLs to return
+        def get_url(local_path):
+            return local_path if local_path.startswith("http") else f"{PUBLIC_BASE_URL}/{folder_name}/{os.path.basename(local_path)}"
+
         files_to_send = {
-            os.path.basename(hw_output): f"https://it-assessment-api.onrender.com/files/{folder_name}/{os.path.basename(hw_output)}",
-            os.path.basename(sw_output): f"https://it-assessment-api.onrender.com/files/{folder_name}/{os.path.basename(sw_output)}",
-            os.path.basename(docx_output): docx_output if docx_output.startswith("http") else f"https://it-assessment-api.onrender.com/files/{folder_name}/{os.path.basename(docx_output)}",
-            os.path.basename(pptx_output): pptx_output if pptx_output.startswith("http") else f"https://it-assessment-api.onrender.com/files/{folder_name}/{os.path.basename(pptx_output)}"
+            os.path.basename(hw_output): get_url(hw_output),
+            os.path.basename(sw_output): get_url(sw_output),
+            os.path.basename(docx_output): get_url(docx_output),
+            os.path.basename(pptx_output): get_url(pptx_output)
         }
 
         send_result(webhook, session_id, "it_assessment", "complete", "Assessment completed", files_to_send)
