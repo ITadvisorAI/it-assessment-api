@@ -83,7 +83,11 @@ def serve_file(filename):
 
 # === Main Entry Point ===
 if __name__ == '__main__':
-    os.makedirs(BASE_DIR, exist_ok=True)
-    port = int(os.environ.get("PORT", 5000))
+   os.makedirs(BASE_DIR, exist_ok=True)
+    try:
+        port = int(os.environ["PORT"])
+    except KeyError:
+        raise RuntimeError("PORT environment variable is not set. Render will inject it automatically.")
+    
     logging.info(f"🚦 Starting IT Assessment Server on port {port}...")
     app.run(debug=False, host="0.0.0.0", port=port)
