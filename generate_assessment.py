@@ -41,6 +41,7 @@ def send_result(webhook, session_id, module, status, message, files):
 def generate_tier_chart(ws, output_path):
     tier_col_idx = None
     headers = [cell.value for cell in next(ws.iter_rows(min_row=1, max_row=1))]
+
     for idx, h in enumerate(headers):
         if h and "tier" in str(h).lower():
             tier_col_idx = idx
@@ -72,46 +73,44 @@ def process_assessment(session_id, email, files, webhook, session_folder):
         print(f"📦 Files payload: {files}")
         os.makedirs(session_folder, exist_ok=True)
 
-        # ✅ Force clean folder name (always exactly one Temp_ prefix)
-        raw_id = session_id[5:] if session_id.startswith("Temp_") else session_id
-        folder_name = f"Temp_{raw_id}"
+        folder_name = session_id if session_id.startswith("Temp_") else f"Temp_{session_id}"
 
         for f in files:
             file_path = os.path.join(session_folder, f['file_name'])
             download_file(f['file_url'], file_path)
 
-        # Excel template generation
+        # File names
         hw_template = "templates/HWGapAnalysis.xlsx"
         sw_template = "templates/SWGapAnalysis.xlsx"
-        hw_output = f"HWGapAnalysis_{session_id}.xlsx"
-        sw_output = f"SWGapAnalysis_{session_id}.xlsx"
-        hw_output_path = os.path.join(session_folder, hw_output)
-        sw_output_path = os.path.join(session_folder, sw_output)
-
+        hw_output = os.path.join(session_folder, f"HWGapAnalysis_{session_id}.xlsx")
+        sw_output = os.path.join(session_folder, f"SWGapAnalysis_{session_id}.xlsx")
         docx_template = "templates/IT_Current_Status_Assesment_Template.docx"
         docx_output = os.path.join(session_folder, "IT_Current_Status_Assessment_Report.docx")
         pptx_template = "templates/IT_Infrastructure_Assessment_Report.pptx"
         pptx_output = os.path.join(session_folder, "IT_Current_Status_Executive_Report.pptx")
         chart_path = os.path.join(session_folder, "tier_distribution.png")
 
+        # HW Gap
         try:
             wb = load_workbook(hw_template)
             ws = wb["GAP_Working"] if "GAP_Working" in wb.sheetnames else wb.active
             generate_tier_chart(ws, chart_path)
-            wb.save(hw_output_path)
-            print(f"✅ HW GAP file: {hw_output_path}")
+            wb.save(hw_output)
+            print(f"✅ HW GAP file: {hw_output}")
         except Exception as e:
             print(f"🔴 HW GAP failed: {e}")
             traceback.print_exc()
 
+        # SW Gap
         try:
             wb = load_workbook(sw_template)
-            wb.save(sw_output_path)
-            print(f"✅ SW GAP file: {sw_output_path}")
+            wb.save(sw_output)
+            print(f"✅ SW GAP file: {sw_output}")
         except Exception as e:
             print(f"🔴 SW GAP failed: {e}")
             traceback.print_exc()
 
+        # DOCX
         try:
             doc = Document(docx_template)
             doc.paragraphs[0].text = f"Assessment Report - Session {session_id}"
@@ -124,15 +123,15 @@ def process_assessment(session_id, email, files, webhook, session_folder):
             print(f"🔴 DOCX failed: {e}")
             traceback.print_exc()
 
+        # PPTX
         try:
             ppt = Presentation(pptx_template)
             slide = ppt.slides[0]
             slide.shapes.title.text = "Executive Assessment Summary"
             slide.placeholders[1].text = f"Session ID: {session_id}"
             chart_slide = ppt.slides.add_slide(ppt.slide_layouts[5])
-            title_shape = chart_slide.shapes.title
-            if title_shape:
-                title_shape.text = "Tier Distribution Chart"
+            if chart_slide.shapes.title:
+                chart_slide.shapes.title.text = "Tier Distribution Chart"
             if os.path.exists(chart_path):
                 chart_slide.shapes.add_picture(chart_path, Inches(1), Inches(1.5), width=Inches(7))
             ppt.save(pptx_output)
@@ -141,13 +140,14 @@ def process_assessment(session_id, email, files, webhook, session_folder):
             print(f"🔴 PPTX failed: {e}")
             traceback.print_exc()
 
-        # ✅ Correct public file URLs using normalized folder name
+        # Upload links
         files_to_send = {
-            os.path.basename(hw_output_path): f"https://it-assessment-api.onrender.com/files/{folder_name}/{os.path.basename(hw_output_path)}",
-            os.path.basename(sw_output_path): f"https://it-assessment-api.onrender.com/files/{folder_name}/{os.path.basename(sw_output_path)}",
+            os.path.basename(hw_output): f"https://it-assessment-api.onrender.com/files/{folder_name}/{os.path.basename(hw_output)}",
+            os.path.basename(sw_output): f"https://it-assessment-api.onrender.com/files/{folder_name}/{os.path.basename(sw_output)}",
             os.path.basename(docx_output): f"https://it-assessment-api.onrender.com/files/{folder_name}/{os.path.basename(docx_output)}",
             os.path.basename(pptx_output): f"https://it-assessment-api.onrender.com/files/{folder_name}/{os.path.basename(pptx_output)}",
         }
+
         send_result(webhook, session_id, "it_assessment", "complete", "", files_to_send)
 
     except Exception as e:
