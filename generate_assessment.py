@@ -7,6 +7,14 @@ from pptx.util import Inches
 from openpyxl import load_workbook
 from collections import Counter
 
+REQUIRED_FILE_TYPES = {"asset_inventory", "gap_working"}
+TEMPLATES = {
+    "hw": "templates/HWGapAnalysis.xlsx",
+    "sw": "templates/SWGapAnalysis.xlsx",
+    "docx": "templates/IT_Current_Status_Assesment_Template.docx",
+    "pptx": "templates/IT_Infrastructure_Assessment_Report.pptx"
+}
+
 def download_file(url, dest_path):
     try:
         print(f"⬇️ Downloading: {url}")
@@ -41,7 +49,6 @@ def send_result(webhook, session_id, module, status, message, files):
 def generate_tier_chart(ws, output_path):
     tier_col_idx = None
     headers = [cell.value for cell in next(ws.iter_rows(min_row=1, max_row=1))]
-
     for idx, h in enumerate(headers):
         if h and "tier" in str(h).lower():
             tier_col_idx = idx
@@ -75,24 +82,27 @@ def process_assessment(session_id, email, files, webhook, session_folder):
 
         folder_name = session_id if session_id.startswith("Temp_") else f"Temp_{session_id}"
 
+        file_dict = {f['type']: f for f in files if f.get('type') in REQUIRED_FILE_TYPES}
+        missing = REQUIRED_FILE_TYPES - file_dict.keys()
+        if missing:
+            raise ValueError(f"Missing required file types: {', '.join(missing)}")
+
+        for key, path in TEMPLATES.items():
+            if not os.path.exists(path):
+                raise FileNotFoundError(f"Missing template: {path}")
+
         for f in files:
             file_path = os.path.join(session_folder, f['file_name'])
             download_file(f['file_url'], file_path)
 
-        # File names
-        hw_template = "templates/HWGapAnalysis.xlsx"
-        sw_template = "templates/SWGapAnalysis.xlsx"
         hw_output = os.path.join(session_folder, f"HWGapAnalysis_{session_id}.xlsx")
         sw_output = os.path.join(session_folder, f"SWGapAnalysis_{session_id}.xlsx")
-        docx_template = "templates/IT_Current_Status_Assesment_Template.docx"
         docx_output = os.path.join(session_folder, "IT_Current_Status_Assessment_Report.docx")
-        pptx_template = "templates/IT_Infrastructure_Assessment_Report.pptx"
         pptx_output = os.path.join(session_folder, "IT_Current_Status_Executive_Report.pptx")
         chart_path = os.path.join(session_folder, "tier_distribution.png")
 
-        # HW Gap
         try:
-            wb = load_workbook(hw_template)
+            wb = load_workbook(TEMPLATES["hw"])
             ws = wb["GAP_Working"] if "GAP_Working" in wb.sheetnames else wb.active
             generate_tier_chart(ws, chart_path)
             wb.save(hw_output)
@@ -101,18 +111,16 @@ def process_assessment(session_id, email, files, webhook, session_folder):
             print(f"🔴 HW GAP failed: {e}")
             traceback.print_exc()
 
-        # SW Gap
         try:
-            wb = load_workbook(sw_template)
+            wb = load_workbook(TEMPLATES["sw"])
             wb.save(sw_output)
             print(f"✅ SW GAP file: {sw_output}")
         except Exception as e:
             print(f"🔴 SW GAP failed: {e}")
             traceback.print_exc()
 
-        # DOCX
         try:
-            doc = Document(docx_template)
+            doc = Document(TEMPLATES["docx"])
             doc.paragraphs[0].text = f"Assessment Report - Session {session_id}"
             if os.path.exists(chart_path):
                 doc.add_paragraph("Tier Distribution Overview:")
@@ -123,9 +131,8 @@ def process_assessment(session_id, email, files, webhook, session_folder):
             print(f"🔴 DOCX failed: {e}")
             traceback.print_exc()
 
-        # PPTX
         try:
-            ppt = Presentation(pptx_template)
+            ppt = Presentation(TEMPLATES["pptx"])
             slide = ppt.slides[0]
             slide.shapes.title.text = "Executive Assessment Summary"
             slide.placeholders[1].text = f"Session ID: {session_id}"
@@ -140,7 +147,6 @@ def process_assessment(session_id, email, files, webhook, session_folder):
             print(f"🔴 PPTX failed: {e}")
             traceback.print_exc()
 
-        # Upload links
         files_to_send = {
             os.path.basename(hw_output): f"https://it-assessment-api.onrender.com/files/{folder_name}/{os.path.basename(hw_output)}",
             os.path.basename(sw_output): f"https://it-assessment-api.onrender.com/files/{folder_name}/{os.path.basename(sw_output)}",
