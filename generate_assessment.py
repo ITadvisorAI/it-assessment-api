@@ -14,6 +14,7 @@ TEMPLATES = {
     "docx": "templates/IT_Current_Status_Assesment_Template.docx",
     "pptx": "templates/IT_Infrastructure_Assessment_Report.pptx"
 }
+GENERATE_API_URL = "https://docx-generator-api.onrender.com/generate_assessment"
 
 def download_file(url, dest_path):
     try:
@@ -74,10 +75,27 @@ def generate_tier_chart(ws, output_path):
     print(f"✅ Tier chart saved to: {output_path}")
     return True
 
+def call_generate_api(session_id, score_summary, recommendations, key_findings):
+    payload = {
+        "session_id": session_id,
+        "score_summary": score_summary,
+        "recommendations": recommendations,
+        "key_findings": key_findings or ""
+    }
+    print(f"📤 Calling generate_assessment API: {GENERATE_API_URL}")
+    try:
+        response = requests.post(GENERATE_API_URL, json=payload)
+        response.raise_for_status()
+        print(f"✅ Generate API responded: {response.status_code}")
+        return response.json()
+    except Exception as e:
+        print(f"🔴 Error calling generate_assessment: {e}")
+        traceback.print_exc()
+        return {}
+
 def process_assessment(session_id, email, files, webhook, session_folder):
     try:
         print(f"🔧 Starting assessment for session: {session_id}")
-        print(f"📦 Files payload: {files}")
         os.makedirs(session_folder, exist_ok=True)
 
         folder_name = session_id if session_id.startswith("Temp_") else f"Temp_{session_id}"
@@ -120,41 +138,28 @@ def process_assessment(session_id, email, files, webhook, session_folder):
             traceback.print_exc()
 
         try:
-            doc = Document(TEMPLATES["docx"])
-            doc.paragraphs[0].text = f"Assessment Report - Session {session_id}"
-            if os.path.exists(chart_path):
-                doc.add_paragraph("Tier Distribution Overview:")
-                doc.add_picture(chart_path, width=Inches(5.5))
-            doc.save(docx_output)
-            print(f"✅ DOCX generated: {docx_output}")
-        except Exception as e:
-            print(f"🔴 DOCX failed: {e}")
-            traceback.print_exc()
+            score_summary = "Excellent: 20%, Advanced: 40%, Standard: 30%, Obsolete: 10%"
+            recommendations = "Decommission Tier 1 servers and move Tier 2 apps to cloud."
+            key_findings = "Some business-critical workloads are hosted on obsolete hardware."
+            gen_result = call_generate_api(session_id, score_summary, recommendations, key_findings)
 
-        try:
-            ppt = Presentation(TEMPLATES["pptx"])
-            slide = ppt.slides[0]
-            slide.shapes.title.text = "Executive Assessment Summary"
-            slide.placeholders[1].text = f"Session ID: {session_id}"
-            chart_slide = ppt.slides.add_slide(ppt.slide_layouts[5])
-            if chart_slide.shapes.title:
-                chart_slide.shapes.title.text = "Tier Distribution Chart"
-            if os.path.exists(chart_path):
-                chart_slide.shapes.add_picture(chart_path, Inches(1), Inches(1.5), width=Inches(7))
-            ppt.save(pptx_output)
-            print(f"✅ PPTX generated: {pptx_output}")
+            if 'docx_url' in gen_result:
+                docx_output = gen_result['docx_url']
+            if 'pptx_url' in gen_result:
+                pptx_output = gen_result['pptx_url']
+
         except Exception as e:
-            print(f"🔴 PPTX failed: {e}")
+            print(f"🔴 External DOCX/PPTX generation failed: {e}")
             traceback.print_exc()
 
         files_to_send = {
             os.path.basename(hw_output): f"https://it-assessment-api.onrender.com/files/{folder_name}/{os.path.basename(hw_output)}",
             os.path.basename(sw_output): f"https://it-assessment-api.onrender.com/files/{folder_name}/{os.path.basename(sw_output)}",
-            os.path.basename(docx_output): f"https://it-assessment-api.onrender.com/files/{folder_name}/{os.path.basename(docx_output)}",
-            os.path.basename(pptx_output): f"https://it-assessment-api.onrender.com/files/{folder_name}/{os.path.basename(pptx_output)}",
+            os.path.basename(docx_output): docx_output if docx_output.startswith("http") else f"https://it-assessment-api.onrender.com/files/{folder_name}/{os.path.basename(docx_output)}",
+            os.path.basename(pptx_output): pptx_output if pptx_output.startswith("http") else f"https://it-assessment-api.onrender.com/files/{folder_name}/{os.path.basename(pptx_output)}"
         }
 
-        send_result(webhook, session_id, "it_assessment", "complete", "", files_to_send)
+        send_result(webhook, session_id, "it_assessment", "complete", "Assessment completed", files_to_send)
 
     except Exception as e:
         print(f"💥 Unhandled error in process_assessment: {e}")
