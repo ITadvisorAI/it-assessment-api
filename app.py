@@ -19,7 +19,7 @@ ALLOWED_TYPES = {"asset_inventory", "gap_working", "intake", "log"}
 def health_check():
     return "✅ IT Assessment API is up and running", 200
 
-# === Triggered from GPT1 or Make.com ===
+# === Start Assessment Endpoint ===
 @app.route('/start_assessment', methods=['POST'])
 def start_assessment():
     try:
@@ -81,9 +81,9 @@ def serve_file(filename):
         logging.exception(f"❌ File serve error for: {filename}")
         return jsonify({"error": str(e)}), 500
 
-# === App Entry Point ===
+# === Main Entry Point ===
 if __name__ == '__main__':
     os.makedirs(BASE_DIR, exist_ok=True)
-    logging.info("🚦 Starting IT Assessment Server...")
     port = int(os.environ.get("PORT", 5000))
+    logging.info(f"🚦 Starting IT Assessment Server on port {port}...")
     app.run(debug=False, host="0.0.0.0", port=port)
