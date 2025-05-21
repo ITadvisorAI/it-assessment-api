@@ -18,6 +18,7 @@ TEMPLATES = {
 }
 GENERATE_API_URL = "https://docx-generator-api.onrender.com/generate_assessment"
 PUBLIC_BASE_URL = "https://it-assessment-api.onrender.com/files"
+NEXT_API_URL = "https://market-gap-analysis.onrender.com/start_market_gap"
 
 def download_file(url, dest_path):
     try:
@@ -31,7 +32,7 @@ def download_file(url, dest_path):
         print(f"🔴 Failed to download {url}: {e}")
         traceback.print_exc()
 
-def send_result(webhook, session_id, module, status, message, files):
+def send_result_to_tracker(webhook, session_id, module, status, message, files):
     payload = {
         "session_id": session_id,
         "gpt_module": module,
@@ -42,12 +43,29 @@ def send_result(webhook, session_id, module, status, message, files):
         payload[f"file_{i}_name"] = name
         payload[f"file_{i}_url"] = url
 
-    print(f"📤 Sending result to webhook: {webhook}")
+    print(f"📤 Sending result to tracker: {webhook}")
     try:
         response = requests.post(webhook, json=payload)
-        print(f"🔁 Webhook responded with: {response.status_code} - {response.text}")
+        print(f"🔁 Tracker responded: {response.status_code} - {response.text}")
     except Exception as e:
-        print(f"🔴 Webhook error: {e}")
+        print(f"🔴 Tracker error: {e}")
+        traceback.print_exc()
+
+def trigger_next_module(session_id, email, files):
+    payload = {
+        "session_id": session_id,
+        "email": email
+    }
+    for i, (name, url) in enumerate(files.items(), start=1):
+        payload[f"file_{i}_name"] = name
+        payload[f"file_{i}_url"] = url
+
+    print(f"📡 Triggering Market GAP Analysis at {NEXT_API_URL}")
+    try:
+        response = requests.post(NEXT_API_URL, json=payload)
+        print(f"➡️ Next module response: {response.status_code} - {response.text}")
+    except Exception as e:
+        print(f"❌ Error calling next module: {e}")
         traceback.print_exc()
 
 def generate_tier_chart(ws, output_path):
@@ -103,30 +121,25 @@ def process_assessment(session_id, email, files, webhook, session_folder):
 
         folder_name = session_id if session_id.startswith("Temp_") else f"Temp_{session_id}"
 
-        # Filter only the required types
         file_dict = {f['type']: f for f in files if f.get('type') in REQUIRED_FILE_TYPES}
         missing = REQUIRED_FILE_TYPES - file_dict.keys()
         if missing:
             raise ValueError(f"Missing required file types: {', '.join(missing)}")
 
-        # Check all required templates exist
         for key, path in TEMPLATES.items():
             if not os.path.exists(path):
                 raise FileNotFoundError(f"Missing template: {path}")
 
-        # Download all files
         for f in files:
             file_path = os.path.join(session_folder, f['file_name'])
             download_file(f['file_url'], file_path)
 
-        # Define output paths
         hw_output = os.path.join(session_folder, f"HWGapAnalysis_{session_id}.xlsx")
         sw_output = os.path.join(session_folder, f"SWGapAnalysis_{session_id}.xlsx")
         docx_output = os.path.join(session_folder, "IT_Current_Status_Assessment_Report.docx")
         pptx_output = os.path.join(session_folder, "IT_Current_Status_Executive_Report.pptx")
         chart_path = os.path.join(session_folder, "tier_distribution.png")
 
-        # HW GAP Analysis
         try:
             wb = load_workbook(TEMPLATES["hw"])
             ws = wb["GAP_Working"] if "GAP_Working" in wb.sheetnames else wb.active
@@ -137,7 +150,6 @@ def process_assessment(session_id, email, files, webhook, session_folder):
             print(f"🔴 HW GAP failed: {e}")
             traceback.print_exc()
 
-        # SW GAP Analysis
         try:
             wb = load_workbook(TEMPLATES["sw"])
             wb.save(sw_output)
@@ -146,7 +158,6 @@ def process_assessment(session_id, email, files, webhook, session_folder):
             print(f"🔴 SW GAP failed: {e}")
             traceback.print_exc()
 
-        # Generate DOCX and PPTX via external API
         try:
             score_summary = "Excellent: 20%, Advanced: 40%, Standard: 30%, Obsolete: 10%"
             recommendations = "Decommission Tier 1 servers and move Tier 2 apps to cloud."
@@ -161,7 +172,6 @@ def process_assessment(session_id, email, files, webhook, session_folder):
             print(f"🔴 External DOCX/PPTX generation failed: {e}")
             traceback.print_exc()
 
-        # Build file URLs to return
         def get_url(local_path):
             return local_path if local_path.startswith("http") else f"{PUBLIC_BASE_URL}/{folder_name}/{os.path.basename(local_path)}"
 
@@ -172,7 +182,8 @@ def process_assessment(session_id, email, files, webhook, session_folder):
             os.path.basename(pptx_output): get_url(pptx_output)
         }
 
-        send_result(webhook, session_id, "it_assessment", "complete", "Assessment completed", files_to_send)
+        send_result_to_tracker(webhook, session_id, "it_assessment", "complete", "Assessment completed", files_to_send)
+        trigger_next_module(session_id, email, files_to_send)
 
     except Exception as e:
         print(f"💥 Unhandled error in process_assessment: {e}")
