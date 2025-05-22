@@ -13,9 +13,10 @@ REQUIRED_FILE_TYPES = {"asset_inventory", "gap_working"}
 TEMPLATES = {
     "hw": "templates/HWGapAnalysis.xlsx",
     "sw": "templates/SWGapAnalysis.xlsx",
-    "docx": "templates/IT_Current_Status_Assesment_Template.docx",
+    "docx": "templates/IT_Current_Status_Assessment_Template.docx",
     "pptx": "templates/IT_Infrastructure_Assessment_Report.pptx"
 }
+
 GENERATE_API_URL = "https://docx-generator-api.onrender.com/generate_assessment"
 PUBLIC_BASE_URL = "https://it-assessment-api.onrender.com/files"
 NEXT_API_URL = "https://market-gap-analysis.onrender.com/start_market_gap"
@@ -118,17 +119,16 @@ def process_assessment(session_id, email, files, webhook, session_folder):
     try:
         print(f"🔧 Starting assessment for session: {session_id}")
         os.makedirs(session_folder, exist_ok=True)
-
         folder_name = session_id if session_id.startswith("Temp_") else f"Temp_{session_id}"
 
         file_dict = {f['type']: f for f in files if f.get('type') in REQUIRED_FILE_TYPES}
         missing = REQUIRED_FILE_TYPES - file_dict.keys()
         if missing:
-            print(f"⚠️ Warning: Missing required file types: {', '.join(missing)} — proceeding with available data.")
+            print(f"⚠️ Missing required file types: {', '.join(missing)} — proceeding anyway.")
 
         for key, path in TEMPLATES.items():
             if not os.path.exists(path):
-                print(f"⚠️ Warning: Missing template: {path} — skipping related output.")
+                print(f"⚠️ Missing template file: {path}")
 
         for f in files:
             file_path = os.path.join(session_folder, f['file_name'])
@@ -140,30 +140,29 @@ def process_assessment(session_id, email, files, webhook, session_folder):
         pptx_output = os.path.join(session_folder, "IT_Current_Status_Executive_Report.pptx")
         chart_path = os.path.join(session_folder, "tier_distribution.png")
 
+        # Generate HW GAP
         if "asset_inventory" in file_dict and os.path.exists(TEMPLATES["hw"]):
             try:
                 wb = load_workbook(TEMPLATES["hw"])
                 ws = wb["GAP_Working"] if "GAP_Working" in wb.sheetnames else wb.active
                 generate_tier_chart(ws, chart_path)
                 wb.save(hw_output)
-                print(f"✅ HW GAP file: {hw_output}")
+                print(f"✅ HW GAP analysis saved: {hw_output}")
             except Exception as e:
-                print(f"🔴 HW GAP failed: {e}")
+                print(f"🔴 HW GAP generation failed: {e}")
                 traceback.print_exc()
-        else:
-            print("ℹ️ Skipping HW GAP – required input or template missing.")
 
+        # Generate SW GAP
         if os.path.exists(TEMPLATES["sw"]):
             try:
                 wb = load_workbook(TEMPLATES["sw"])
                 wb.save(sw_output)
-                print(f"✅ SW GAP file: {sw_output}")
+                print(f"✅ SW GAP analysis saved: {sw_output}")
             except Exception as e:
-                print(f"🔴 SW GAP failed: {e}")
+                print(f"🔴 SW GAP generation failed: {e}")
                 traceback.print_exc()
-        else:
-            print("ℹ️ Skipping SW GAP – template missing.")
 
+        # Call DOCX/PPTX generator API
         try:
             score_summary = "Excellent: 20%, Advanced: 40%, Standard: 30%, Obsolete: 10%"
             recommendations = "Decommission Tier 1 servers and move Tier 2 apps to cloud."
@@ -175,7 +174,7 @@ def process_assessment(session_id, email, files, webhook, session_folder):
             if 'pptx_url' in gen_result:
                 pptx_output = gen_result['pptx_url']
         except Exception as e:
-            print(f"🔴 External DOCX/PPTX generation failed: {e}")
+            print(f"🔴 Error generating DOCX/PPTX via external API: {e}")
             traceback.print_exc()
 
         def get_url(local_path):
@@ -188,6 +187,7 @@ def process_assessment(session_id, email, files, webhook, session_folder):
             os.path.basename(pptx_output): get_url(pptx_output)
         }
 
+        # Notify tracker and trigger next module
         send_result_to_tracker(webhook, session_id, "it_assessment", "complete", "Assessment completed", files_to_send)
         trigger_next_module(session_id, email, files_to_send)
 
