@@ -124,11 +124,11 @@ def process_assessment(session_id, email, files, webhook, session_folder):
         file_dict = {f['type']: f for f in files if f.get('type') in REQUIRED_FILE_TYPES}
         missing = REQUIRED_FILE_TYPES - file_dict.keys()
         if missing:
-            raise ValueError(f"Missing required file types: {', '.join(missing)}")
+            print(f"⚠️ Warning: Missing required file types: {', '.join(missing)} — proceeding with available data.")
 
         for key, path in TEMPLATES.items():
             if not os.path.exists(path):
-                raise FileNotFoundError(f"Missing template: {path}")
+                print(f"⚠️ Warning: Missing template: {path} — skipping related output.")
 
         for f in files:
             file_path = os.path.join(session_folder, f['file_name'])
@@ -140,23 +140,29 @@ def process_assessment(session_id, email, files, webhook, session_folder):
         pptx_output = os.path.join(session_folder, "IT_Current_Status_Executive_Report.pptx")
         chart_path = os.path.join(session_folder, "tier_distribution.png")
 
-        try:
-            wb = load_workbook(TEMPLATES["hw"])
-            ws = wb["GAP_Working"] if "GAP_Working" in wb.sheetnames else wb.active
-            generate_tier_chart(ws, chart_path)
-            wb.save(hw_output)
-            print(f"✅ HW GAP file: {hw_output}")
-        except Exception as e:
-            print(f"🔴 HW GAP failed: {e}")
-            traceback.print_exc()
+        if "asset_inventory" in file_dict and os.path.exists(TEMPLATES["hw"]):
+            try:
+                wb = load_workbook(TEMPLATES["hw"])
+                ws = wb["GAP_Working"] if "GAP_Working" in wb.sheetnames else wb.active
+                generate_tier_chart(ws, chart_path)
+                wb.save(hw_output)
+                print(f"✅ HW GAP file: {hw_output}")
+            except Exception as e:
+                print(f"🔴 HW GAP failed: {e}")
+                traceback.print_exc()
+        else:
+            print("ℹ️ Skipping HW GAP – required input or template missing.")
 
-        try:
-            wb = load_workbook(TEMPLATES["sw"])
-            wb.save(sw_output)
-            print(f"✅ SW GAP file: {sw_output}")
-        except Exception as e:
-            print(f"🔴 SW GAP failed: {e}")
-            traceback.print_exc()
+        if os.path.exists(TEMPLATES["sw"]):
+            try:
+                wb = load_workbook(TEMPLATES["sw"])
+                wb.save(sw_output)
+                print(f"✅ SW GAP file: {sw_output}")
+            except Exception as e:
+                print(f"🔴 SW GAP failed: {e}")
+                traceback.print_exc()
+        else:
+            print("ℹ️ Skipping SW GAP – template missing.")
 
         try:
             score_summary = "Excellent: 20%, Advanced: 40%, Standard: 30%, Obsolete: 10%"
