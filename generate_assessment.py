@@ -4,7 +4,6 @@ import traceback
 import requests
 import matplotlib.pyplot as plt
 from docx import Document
-from docx.shared import Inches
 from pptx import Presentation
 from pptx.util import Inches
 from openpyxl import load_workbook
@@ -54,12 +53,14 @@ def get_or_create_drive_folder(folder_name):
         return response['files'][0]['id']
     file_metadata = {'name': folder_name, 'mimeType': 'application/vnd.google-apps.folder'}
     folder = drive_service.files().create(body=file_metadata, fields='id').execute()
-    print(f"📁 Created Drive folder: {folder_name} (ID: {folder['id']})")
     return folder['id']
 
 def upload_to_drive(local_path, session_id):
     if not drive_service:
         print("❌ Drive not initialized. Skipping upload.")
+        return None
+    if not os.path.exists(local_path):
+        print(f"⚠️ File not found for upload: {local_path}")
         return None
     file_metadata = {'name': os.path.basename(local_path), 'parents': [get_or_create_drive_folder(session_id)]}
     media = MediaFileUpload(local_path, resumable=True)
@@ -113,7 +114,7 @@ def generate_tier_chart(ws, output_path):
         return False
     counts = Counter(tiers)
     plt.figure(figsize=(6, 4))
-    plt.bar(counts.keys(), counts.values(), color='skyblue')
+    plt.bar(counts.keys(), counts.values())
     plt.title("Tier Distribution")
     plt.xlabel("Tier")
     plt.ylabel("Count")
@@ -144,11 +145,11 @@ def process_assessment(session_id, email, files, webhook, session_folder):
     try:
         print(f"🔧 Starting assessment for session: {session_id}")
         os.makedirs(session_folder, exist_ok=True)
-        folder_name = session_id if session_id.startswith("Temp_") else f"Temp_{session_id}"
 
         file_dict = {f['type']: f for f in files if f.get('type') in REQUIRED_FILE_TYPES}
         for f in files:
-            download_file(f['file_url'], os.path.join(session_folder, f['file_name']))
+            file_path = os.path.join(session_folder, f['file_name'])
+            download_file(f['file_url'], file_path)
 
         hw_output = os.path.join(session_folder, f"HWGapAnalysis_{session_id}.xlsx")
         sw_output = os.path.join(session_folder, f"SWGapAnalysis_{session_id}.xlsx")
@@ -176,13 +177,12 @@ def process_assessment(session_id, email, files, webhook, session_folder):
         if 'pptx_url' in gen_result:
             pptx_output = gen_result['pptx_url']
 
-        # Upload all local files to Google Drive
-        upload_to_drive(hw_output, session_id)
-        upload_to_drive(sw_output, session_id)
-        upload_to_drive(docx_output, session_id)
-        upload_to_drive(pptx_output, session_id)
+        if os.path.exists(hw_output): upload_to_drive(hw_output, session_id)
+        if os.path.exists(sw_output): upload_to_drive(sw_output, session_id)
+        if os.path.exists(docx_output): upload_to_drive(docx_output, session_id)
+        if os.path.exists(pptx_output): upload_to_drive(pptx_output, session_id)
 
-        def get_url(path): return path if path.startswith("http") else f"{PUBLIC_BASE_URL}/{folder_name}/{os.path.basename(path)}"
+        def get_url(path): return path if path.startswith("http") else f"{PUBLIC_BASE_URL}/{session_id}/{os.path.basename(path)}"
 
         files_to_send = {
             os.path.basename(hw_output): get_url(hw_output),
