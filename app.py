@@ -1,8 +1,11 @@
-from flask import Flask, request, send_from_directory, jsonify
+from flask import Flask, request, send_from_directory, jsonify 
 import os
 import threading
 import logging
 from generate_assessment import process_assessment
+
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
 
 # === Flask App Initialization ===
 app = Flask(__name__)
@@ -11,7 +14,20 @@ BASE_DIR = "temp_sessions"
 # === Logging Configuration ===
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-# === Known File Types for Logging / Validation (not enforced)
+# === Google Drive Credentials Initialization ===
+try:
+    SERVICE_ACCOUNT_FILE = "/etc/secrets/service_account.json"
+    SCOPES = ["https://www.googleapis.com/auth/drive"]
+    creds = service_account.Credentials.from_service_account_file(
+        SERVICE_ACCOUNT_FILE, scopes=SCOPES
+    )
+    drive_service = build("drive", "v3", credentials=creds)
+    logging.info("✅ Google Drive successfully configured.")
+except Exception as e:
+    logging.error("❌ Google Drive not configured. Error loading service account.")
+    logging.exception(e)
+
+# === Known File Types for Logging / Validation (not enforced) ===
 ALLOWED_TYPES = {
     "asset_inventory", "gap_working", "intake", "log", "capacity_plan",
     "compliance_report", "firewall_rules", "backup_schedule", "strategy_input", "general"
