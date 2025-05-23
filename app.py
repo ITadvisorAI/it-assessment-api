@@ -1,11 +1,8 @@
-
 import os
 import threading
 import logging
 from flask import Flask, request, jsonify, send_from_directory
 from generate_assessment import process_assessment
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
 
 # === Flask App Initialization ===
 app = Flask(__name__)
@@ -13,18 +10,6 @@ BASE_DIR = "temp_sessions"
 
 # === Logging Configuration ===
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-
-# === Google Drive Setup (used in generate_assessment)
-try:
-    SERVICE_ACCOUNT_FILE = "/etc/secrets/service_account.json"
-    SCOPES = ["https://www.googleapis.com/auth/drive"]
-    creds = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
-    drive_service = build("drive", "v3", credentials=creds)
-    logging.info("✅ Google Drive client initialized.")
-except Exception as e:
-    drive_service = None
-    logging.error("❌ Google Drive not configured. Error loading service account.")
-    logging.error(str(e))
 
 # === Health Check ===
 @app.route("/", methods=["GET"])
@@ -50,12 +35,10 @@ def start_assessment():
         logging.info(f"📡 Webhook: {webhook}")
         logging.info(f"📂 Files received: {len(files)}")
 
-        # Validate fields
         if not session_id or not email or not webhook or not files:
             logging.error("❌ Missing one of: session_id, email, webhook, files")
             return jsonify({"error": "Missing required fields"}), 400
 
-        # Validate file format
         for f in files:
             if not isinstance(f, dict) or not all(k in f for k in ['file_name', 'file_url', 'type']):
                 logging.error(f"❌ Malformed file entry: {f}")
@@ -92,6 +75,7 @@ def serve_file(filename):
         logging.exception(f"❌ File serve error for: {filename}")
         return jsonify({"error": str(e)}), 500
 
+# === Main App Entry ===
 if __name__ == "__main__":
     os.makedirs(BASE_DIR, exist_ok=True)
     port = int(os.environ.get("PORT", 10000))
