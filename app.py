@@ -1,83 +1,72 @@
 import os
 import threading
 import logging
+import json
 from flask import Flask, request, jsonify, send_from_directory
 from generate_assessment import process_assessment
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
 
-# === Flask App Initialization ===
 app = Flask(__name__)
 BASE_DIR = "temp_sessions"
-
-# === Logging Configuration ===
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-# === Health Check ===
-@app.route("/", methods=["GET"])
-def health_check():
-    return "✅ IT Assessment API is up and running", 200
+# Optional Google Drive log
+try:
+    if os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON"):
+        creds = service_account.Credentials.from_service_account_info(
+            json.loads(os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")),
+            scopes=["https://www.googleapis.com/auth/drive"]
+        )
+        drive_service = build("drive", "v3", credentials=creds)
+        logging.info("✅ Google Drive service initialized")
+except Exception as e:
+    logging.warning("🔕 Google Drive not active")
+    drive_service = None
 
-# === Start Assessment Endpoint ===
+@app.route("/", methods=["GET"])
+def health():
+    return "✅ IT Assessment API is live", 200
+
 @app.route("/start_assessment", methods=["POST"])
 def start_assessment():
     try:
         data = request.get_json(force=True)
-        logging.info("📥 Received POST /start_assessment")
-
         session_id = data.get("session_id")
         email = data.get("email")
-        goal = data.get("goal", "Not Provided")
+        goal = data.get("goal", "N/A")
         files = data.get("files", [])
         webhook = data.get("next_action_webhook")
 
-        logging.info(f"🧾 Session ID: {session_id}")
-        logging.info(f"📧 Email: {email}")
-        logging.info(f"🎯 Goal: {goal}")
-        logging.info(f"📡 Webhook: {webhook}")
-        logging.info(f"📂 Files received: {len(files)}")
-
-        if not session_id or not email or not webhook or not files:
-            logging.error("❌ Missing one of: session_id, email, webhook, files")
+        if not all([session_id, email, webhook, files]):
             return jsonify({"error": "Missing required fields"}), 400
 
-        for f in files:
-            if not isinstance(f, dict) or not all(k in f for k in ['file_name', 'file_url', 'type']):
-                logging.error(f"❌ Malformed file entry: {f}")
-                return jsonify({"error": "Malformed file entry"}), 400
+        folder = session_id if session_id.startswith("Temp_") else f"Temp_{session_id}"
+        folder_path = os.path.join(BASE_DIR, folder)
+        os.makedirs(folder_path, exist_ok=True)
 
-        folder_name = session_id if session_id.startswith("Temp_") else f"Temp_{session_id}"
-        session_folder = os.path.join(BASE_DIR, folder_name)
-        os.makedirs(session_folder, exist_ok=True)
-        logging.info(f"📁 Session folder ready: {session_folder}")
-
-        thread = threading.Thread(
+        threading.Thread(
             target=process_assessment,
-            args=(session_id, email, files, webhook, session_folder)
-        )
-        thread.daemon = True
-        thread.start()
+            args=(session_id, email, files, webhook, folder_path),
+            daemon=True
+        ).start()
 
-        logging.info("🚀 Background assessment thread started")
         return jsonify({"message": "Assessment started"}), 200
-
     except Exception as e:
-        logging.exception("🔥 Exception in /start_assessment")
+        logging.exception("❌ Error in /start_assessment")
         return jsonify({"error": str(e)}), 500
 
-# === Serve Generated Files ===
 @app.route("/files/<path:filename>", methods=["GET"])
 def serve_file(filename):
     try:
         directory = os.path.join(BASE_DIR, os.path.dirname(filename))
-        file_only = os.path.basename(filename)
-        logging.info(f"📤 Serving file: {filename}")
-        return send_from_directory(directory, file_only)
+        return send_from_directory(directory, os.path.basename(filename))
     except Exception as e:
-        logging.exception(f"❌ File serve error for: {filename}")
+        logging.exception(f"❌ Error serving file: {filename}")
         return jsonify({"error": str(e)}), 500
 
-# === Main App Entry ===
 if __name__ == "__main__":
     os.makedirs(BASE_DIR, exist_ok=True)
     port = int(os.environ.get("PORT", 10000))
-    logging.info(f"🚦 Starting IT Assessment Server on port {port}...")
-    app.run(debug=False, host="0.0.0.0", port=port)
+    logging.info(f"🚦 Starting IT Assessment Server on port {port}")
+    app.run(host="0.0.0.0", port=port)
