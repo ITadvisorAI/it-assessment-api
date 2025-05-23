@@ -1,5 +1,5 @@
-
 import os
+import json
 import traceback
 import requests
 import matplotlib.pyplot as plt
@@ -15,24 +15,27 @@ from googleapiclient.http import MediaFileUpload
 REQUIRED_FILE_TYPES = {"asset_inventory", "gap_working"}
 TEMPLATES = {
     "hw": "templates/HWGapAnalysis.xlsx",
-    "sw": "templates/SWGapAnalysis.xlsx",
-    "docx": "templates/IT_Current_Status_Assessment_Template.docx",
-    "pptx": "templates/IT_Infrastructure_Assessment_Report.pptx"
+    "sw": "templates/SWGapAnalysis.xlsx"
 }
-
 GENERATE_API_URL = "https://docx-generator-api.onrender.com/generate_assessment"
 PUBLIC_BASE_URL = "https://it-assessment-api.onrender.com/files"
 NEXT_API_URL = "https://market-gap-analysis.onrender.com/start_market_gap"
 
+# === Google Drive Setup from ENV ===
+drive_service = None
 try:
-    SERVICE_ACCOUNT_FILE = "/etc/secrets/service_account.json"
-    SCOPES = ["https://www.googleapis.com/auth/drive"]
-    creds = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
-    drive_service = build("drive", "v3", credentials=creds)
-    print("✅ Google Drive client initialized.")
+    service_account_info = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
+    if not service_account_info:
+        print("🔕 Google Drive not configured (ENV missing)")
+    else:
+        creds = service_account.Credentials.from_service_account_info(
+            json.loads(service_account_info), scopes=["https://www.googleapis.com/auth/drive"]
+        )
+        drive_service = build("drive", "v3", credentials=creds)
+        print("✅ Google Drive client initialized from ENV")
 except Exception as e:
-    drive_service = None
-    print(f"❌ Failed to initialize Google Drive: {e}")
+    print(f"❌ Google Drive setup failed: {e}")
+    traceback.print_exc()
 
 def download_file(url, dest_path):
     try:
@@ -43,30 +46,32 @@ def download_file(url, dest_path):
             f.write(response.content)
         print(f"✅ Downloaded: {dest_path}")
     except Exception as e:
-        print(f"🔴 Failed to download {url}: {e}")
+        print(f"🔴 Download failed: {e}")
         traceback.print_exc()
 
 def get_or_create_drive_folder(folder_name):
     query = f"name = '{folder_name}' and mimeType = 'application/vnd.google-apps.folder'"
-    response = drive_service.files().list(q=query, spaces='drive', fields='files(id)').execute()
-    if response['files']:
-        return response['files'][0]['id']
-    file_metadata = {'name': folder_name, 'mimeType': 'application/vnd.google-apps.folder'}
-    folder = drive_service.files().create(body=file_metadata, fields='id').execute()
-    return folder['id']
+    result = drive_service.files().list(q=query, fields="files(id)").execute()
+    folders = result.get("files", [])
+    if folders:
+        return folders[0]["id"]
+    metadata = {"name": folder_name, "mimeType": "application/vnd.google-apps.folder"}
+    folder = drive_service.files().create(body=metadata, fields="id").execute()
+    return folder["id"]
 
 def upload_to_drive(local_path, session_id):
     if not drive_service:
-        print("❌ Drive not initialized. Skipping upload.")
+        print("⚠️ Drive not initialized.")
         return None
     if not os.path.exists(local_path):
-        print(f"⚠️ File not found for upload: {local_path}")
+        print(f"⚠️ File not found: {local_path}")
         return None
-    file_metadata = {'name': os.path.basename(local_path), 'parents': [get_or_create_drive_folder(session_id)]}
+    folder_id = get_or_create_drive_folder(session_id)
+    file_metadata = {"name": os.path.basename(local_path), "parents": [folder_id]}
     media = MediaFileUpload(local_path, resumable=True)
-    uploaded_file = drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-    file_id = uploaded_file.get("id")
-    print(f"📤 Uploaded to Drive: {local_path} (ID: {file_id})")
+    uploaded = drive_service.files().create(body=file_metadata, media_body=media, fields="id").execute()
+    file_id = uploaded["id"]
+    print(f"📤 Uploaded to Drive: {file_id}")
     return f"https://drive.google.com/file/d/{file_id}/view"
 
 def send_result_to_tracker(webhook, session_id, module, status, message, files):
@@ -74,16 +79,16 @@ def send_result_to_tracker(webhook, session_id, module, status, message, files):
         "session_id": session_id,
         "gpt_module": module,
         "status": status,
-        "message": message or ""
+        "message": message
     }
     for i, (name, url) in enumerate(files.items(), start=1):
         payload[f"file_{i}_name"] = name
         payload[f"file_{i}_url"] = url
     try:
-        response = requests.post(webhook, json=payload)
-        print(f"📤 Sent result to tracker: {response.status_code} - {response.text}")
+        r = requests.post(webhook, json=payload)
+        print(f"📤 Tracker response: {r.status_code}")
     except Exception as e:
-        print(f"🔴 Tracker error: {e}")
+        print(f"❌ Tracker call failed: {e}")
         traceback.print_exc()
 
 def trigger_next_module(session_id, email, files):
@@ -92,103 +97,92 @@ def trigger_next_module(session_id, email, files):
         payload[f"file_{i}_name"] = name
         payload[f"file_{i}_url"] = url
     try:
-        response = requests.post(NEXT_API_URL, json=payload)
-        print(f"📡 Triggered next module: {response.status_code} - {response.text}")
+        r = requests.post(NEXT_API_URL, json=payload)
+        print(f"📡 Triggered next module: {r.status_code}")
     except Exception as e:
-        print(f"❌ Error calling next module: {e}")
+        print(f"❌ Trigger failed: {e}")
         traceback.print_exc()
 
 def generate_tier_chart(ws, output_path):
-    tier_col_idx = None
+    tier_col = None
     headers = [cell.value for cell in next(ws.iter_rows(min_row=1, max_row=1))]
-    for idx, h in enumerate(headers):
-        if h and "tier" in str(h).lower():
-            tier_col_idx = idx
+    for idx, header in enumerate(headers):
+        if header and "tier" in str(header).lower():
+            tier_col = idx
             break
-    if tier_col_idx is None:
+    if tier_col is None:
         print("⚠️ Tier column not found.")
         return False
-    tiers = [str(row[tier_col_idx]).strip() for row in ws.iter_rows(min_row=2, values_only=True) if row[tier_col_idx]]
-    if not tiers:
-        print("⚠️ No tier values found.")
-        return False
+    tiers = [str(row[tier_col]) for row in ws.iter_rows(min_row=2, values_only=True) if row[tier_col]]
     counts = Counter(tiers)
-    plt.figure(figsize=(6, 4))
     plt.bar(counts.keys(), counts.values())
     plt.title("Tier Distribution")
-    plt.xlabel("Tier")
-    plt.ylabel("Count")
     plt.tight_layout()
     plt.savefig(output_path)
     plt.close()
-    print(f"✅ Tier chart saved to: {output_path}")
+    print(f"✅ Saved chart: {output_path}")
     return True
 
-def call_generate_api(session_id, score_summary, recommendations, key_findings):
+def call_generate_api(session_id, summary, recommendations, findings):
     payload = {
         "session_id": session_id,
-        "score_summary": score_summary,
+        "score_summary": summary,
         "recommendations": recommendations,
-        "key_findings": key_findings or ""
+        "key_findings": findings
     }
     try:
-        response = requests.post(GENERATE_API_URL, json=payload)
-        response.raise_for_status()
-        print(f"✅ Generate API responded: {response.status_code}")
-        return response.json()
+        r = requests.post(GENERATE_API_URL, json=payload)
+        r.raise_for_status()
+        return r.json()
     except Exception as e:
-        print(f"🔴 Error calling generate_assessment: {e}")
+        print(f"❌ Generate API failed: {e}")
         traceback.print_exc()
         return {}
 
 def process_assessment(session_id, email, files, webhook, session_folder):
     try:
-        print(f"🔧 Starting assessment for session: {session_id}")
         os.makedirs(session_folder, exist_ok=True)
-
-        file_dict = {f['type']: f for f in files if f.get('type') in REQUIRED_FILE_TYPES}
+        file_dict = {f['type']: f for f in files if f['type'] in REQUIRED_FILE_TYPES}
         for f in files:
-            file_path = os.path.join(session_folder, f['file_name'])
-            download_file(f['file_url'], file_path)
+            download_file(f['file_url'], os.path.join(session_folder, f['file_name']))
 
-        hw_output = os.path.join(session_folder, f"HWGapAnalysis_{session_id}.xlsx")
-        sw_output = os.path.join(session_folder, f"SWGapAnalysis_{session_id}.xlsx")
-        docx_output = os.path.join(session_folder, "IT_Current_Status_Assessment_Report.docx")
-        pptx_output = os.path.join(session_folder, "IT_Current_Status_Executive_Report.pptx")
+        hw_out = os.path.join(session_folder, f"HWGapAnalysis_{session_id}.xlsx")
+        sw_out = os.path.join(session_folder, f"SWGapAnalysis_{session_id}.xlsx")
+        docx_path = os.path.join(session_folder, "IT_Current_Status_Assessment_Report.docx")
+        pptx_path = os.path.join(session_folder, "IT_Current_Status_Executive_Report.pptx")
         chart_path = os.path.join(session_folder, "tier_distribution.png")
 
-        if "asset_inventory" in file_dict and os.path.exists(TEMPLATES["hw"]):
+        if "asset_inventory" in file_dict:
             wb = load_workbook(TEMPLATES["hw"])
             ws = wb["GAP_Working"] if "GAP_Working" in wb.sheetnames else wb.active
             generate_tier_chart(ws, chart_path)
-            wb.save(hw_output)
+            wb.save(hw_out)
 
         if os.path.exists(TEMPLATES["sw"]):
             wb = load_workbook(TEMPLATES["sw"])
-            wb.save(sw_output)
+            wb.save(sw_out)
 
-        score_summary = "Excellent: 20%, Advanced: 40%, Standard: 30%, Obsolete: 10%"
-        recommendations = "Decommission Tier 1 servers and move Tier 2 apps to cloud."
-        key_findings = "Some business-critical workloads are hosted on obsolete hardware."
+        gen = call_generate_api(
+            session_id,
+            "Excellent: 20%, Advanced: 40%, Standard: 30%, Obsolete: 10%",
+            "Decommission Tier 1 servers. Cloud migrate Tier 2.",
+            "Legacy workloads on obsolete platforms."
+        )
 
-        gen_result = call_generate_api(session_id, score_summary, recommendations, key_findings)
-        if 'docx_url' in gen_result:
-            docx_output = gen_result['docx_url']
-        if 'pptx_url' in gen_result:
-            pptx_output = gen_result['pptx_url']
+        docx_url = gen.get("docx_url", docx_path)
+        pptx_url = gen.get("pptx_url", pptx_path)
 
-        if os.path.exists(hw_output): upload_to_drive(hw_output, session_id)
-        if os.path.exists(sw_output): upload_to_drive(sw_output, session_id)
-        if os.path.exists(docx_output): upload_to_drive(docx_output, session_id)
-        if os.path.exists(pptx_output): upload_to_drive(pptx_output, session_id)
+        if os.path.exists(hw_out): upload_to_drive(hw_out, session_id)
+        if os.path.exists(sw_out): upload_to_drive(sw_out, session_id)
+        if not docx_url.startswith("http") and os.path.exists(docx_url): docx_url = upload_to_drive(docx_url, session_id)
+        if not pptx_url.startswith("http") and os.path.exists(pptx_url): pptx_url = upload_to_drive(pptx_url, session_id)
 
-        def get_url(path): return path if path.startswith("http") else f"{PUBLIC_BASE_URL}/{session_id}/{os.path.basename(path)}"
-
+        def get_url(p): return p if p.startswith("http") else f"{PUBLIC_BASE_URL}/{session_id}/{os.path.basename(p)}"
         files_to_send = {
-            os.path.basename(hw_output): get_url(hw_output),
-            os.path.basename(sw_output): get_url(sw_output),
-            os.path.basename(docx_output): get_url(docx_output),
-            os.path.basename(pptx_output): get_url(pptx_output)
+            os.path.basename(hw_out): get_url(hw_out),
+            os.path.basename(sw_out): get_url(sw_out),
+            os.path.basename(docx_url): get_url(docx_url),
+            os.path.basename(pptx_url): get_url(pptx_url)
         }
 
         send_result_to_tracker(webhook, session_id, "it_assessment", "complete", "Assessment completed", files_to_send)
