@@ -2,12 +2,13 @@ import os
 import json
 import traceback
 import requests
+import pandas as pd
+from collections import Counter
 import matplotlib.pyplot as plt
 from docx import Document
 from pptx import Presentation
 from pptx.util import Inches
-from openpyxl import load_workbook
-from collections import Counter
+from openpyxl import load_workbook, Workbook
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -38,7 +39,6 @@ GENERATE_API_URL = "https://docx-generator-api.onrender.com/generate_assessment"
 PUBLIC_BASE_URL = "https://it-assessment-api.onrender.com/files"
 NEXT_API_URL = "https://market-gap-analysis.onrender.com/start_market_gap"
 
-# === Helper Functions ===
 def download_file(url, dest_path):
     try:
         response = requests.get(url, timeout=15)
@@ -136,19 +136,37 @@ def trigger_next_module(session_id, email, files):
         print(f"❌ Next module trigger error: {e}")
         traceback.print_exc()
 
+# === NEW: Generate GAP Working Sheet ===
+def generate_gap_working(inventory_path, tier_matrix_path, output_path):
+    df_inv = pd.read_csv(inventory_path)
+    df_tier = pd.read_excel(tier_matrix_path)
+
+    df_merged = df_inv.merge(df_tier, how='left', left_on='Model', right_on='Model')
+    df_merged["Age"] = 2025 - df_merged["Year"]
+    df_merged["Obsolete"] = df_merged["Tier"].apply(lambda x: "Yes" if str(x).strip().lower() in ["basic", "1"] else "No")
+
+    cols = ["Asset ID", "Category", "Vendor", "Model", "Year", "Age", "Tier", "Obsolete", "Location", "Function"]
+    df_merged = df_merged[[col for col in cols if col in df_merged.columns]]
+    df_merged.to_excel(output_path, index=False)
+    print(f"✅ GAP working file created: {output_path}")
+
 # === Main Handler ===
 def process_assessment(session_id, email, files, webhook, session_folder):
     try:
         print(f"🚀 Starting process_assessment: {session_id}")
         os.makedirs(session_folder, exist_ok=True)
 
+        downloaded = {}
         for f in files:
             path = os.path.join(session_folder, f["file_name"])
             download_file(f["file_url"], path)
+            downloaded[f["file_name"]] = path
 
         hw_out = os.path.join(session_folder, f"HWGapAnalysis_{session_id}.xlsx")
         sw_out = os.path.join(session_folder, f"SWGapAnalysis_{session_id}.xlsx")
         chart_path = os.path.join(session_folder, "tier_chart.png")
+        gap_out = os.path.join(session_folder, f"assessment_gap_working.xlsx")
+        tier_matrix_path = "ClassificationTier.xlsx"
 
         if os.path.exists(TEMPLATES["hw"]):
             wb = load_workbook(TEMPLATES["hw"])
@@ -159,6 +177,10 @@ def process_assessment(session_id, email, files, webhook, session_folder):
         if os.path.exists(TEMPLATES["sw"]):
             wb = load_workbook(TEMPLATES["sw"])
             wb.save(sw_out)
+
+        asset_inv_path = next((p for name, p in downloaded.items() if "asset" in name.lower()), None)
+        if asset_inv_path and os.path.exists(tier_matrix_path):
+            generate_gap_working(asset_inv_path, tier_matrix_path, gap_out)
 
         summary = "Excellent: 20%, Advanced: 40%, Standard: 30%, Obsolete: 10%"
         recommendations = "Decommission Tier 1 servers. Migrate Tier 2 workloads to cloud."
@@ -171,6 +193,7 @@ def process_assessment(session_id, email, files, webhook, session_folder):
         files_out = {
             os.path.basename(hw_out): upload_to_drive(hw_out, session_id),
             os.path.basename(sw_out): upload_to_drive(sw_out, session_id),
+            os.path.basename(gap_out): upload_to_drive(gap_out, session_id),
             "IT_Current_Status_Assessment_Report.docx": docx_url,
             "IT_Current_Status_Executive_Report.pptx": pptx_url
         }
