@@ -98,6 +98,7 @@ def call_generate_api(session_id, score_summary, recommendations, key_findings):
         "key_findings": key_findings
     }
     try:
+        print("➡️ Payload to docx-generator-api:", payload)
         r = requests.post(GENERATE_API_URL, json=payload)
         r.raise_for_status()
         return r.json()
