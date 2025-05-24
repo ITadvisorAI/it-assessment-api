@@ -1,215 +1,90 @@
 import os
+import threading
+import logging
 import json
-import traceback
-import requests
-import pandas as pd
-from collections import Counter
-import matplotlib.pyplot as plt
-from docx import Document
-from pptx import Presentation
-from pptx.util import Inches
-from openpyxl import load_workbook
+from flask import Flask, request, jsonify, send_from_directory
+from generate_assessment import process_assessment
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
 
-# === Setup Google Drive ===
+# === Flask Initialization ===
+app = Flask(__name__)
+BASE_DIR = "temp_sessions"
+os.makedirs(BASE_DIR, exist_ok=True)
+
+# === Logging ===
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
+# === Optional Google Drive Setup ===
 drive_service = None
-try:
-    creds_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
-    if not creds_json:
-        raise ValueError("Missing GOOGLE_SERVICE_ACCOUNT_JSON environment variable")
-    creds = service_account.Credentials.from_service_account_info(
-        json.loads(creds_json),
-        scopes=["https://www.googleapis.com/auth/drive"]
-    )
-    drive_service = build("drive", "v3", credentials=creds)
-    print("✅ Google Drive initialized (ENV)")
-except Exception as e:
-    print(f"❌ Drive init failed: {e}")
-    traceback.print_exc()
-
-# === Constants ===
-TEMPLATES = {
-    "hw": "templates/HWGapAnalysis.xlsx",
-    "sw": "templates/SWGapAnalysis.xlsx"
-}
-GENERATE_API_URL = "https://docx-generator-api.onrender.com/generate_assessment"
-PUBLIC_BASE_URL = "https://it-assessment-api.onrender.com/files"
-NEXT_API_URL = "https://market-gap-analysis.onrender.com/start_market_gap"
-
-
-def download_file(url, dest_path):
+if os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON"):
     try:
-        response = requests.get(url, timeout=15)
-        response.raise_for_status()
-        with open(dest_path, "wb") as f:
-            f.write(response.content)
-        print(f"⬇️ Downloaded: {dest_path}")
+        service_account_info = json.loads(os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON"))
+        creds = service_account.Credentials.from_service_account_info(
+            service_account_info,
+            scopes=["https://www.googleapis.com/auth/drive"]
+        )
+        drive_service = build('drive', 'v3', credentials=creds)
+        logging.info("✅ Google Drive service initialized")
     except Exception as e:
-        print(f"❌ Download error: {e}")
-        traceback.print_exc()
+        logging.warning(f"⚠️ Failed to initialize Google Drive: {e}")
+else:
+    logging.info("🔕 Google Drive not configured")
 
+# === Health Check ===
+@app.route("/", methods=["GET"])
+def health():
+    return "✅ IT Assessment API is live", 200
 
-def get_or_create_drive_folder(folder_name):
-    query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder'"
-    result = drive_service.files().list(q=query, fields="files(id)").execute()
-    folders = result.get("files", [])
-    if folders:
-        return folders[0]["id"]
-    folder = drive_service.files().create(
-        body={"name": folder_name, "mimeType": "application/vnd.google-apps.folder"},
-        fields="id"
-    ).execute()
-    return folder["id"]
-
-
-def upload_to_drive(file_path, session_id):
-    if not drive_service or not os.path.exists(file_path):
-        return None
-    folder_id = get_or_create_drive_folder(session_id)
-    file_meta = {"name": os.path.basename(file_path), "parents": [folder_id]}
-    media = MediaFileUpload(file_path, resumable=True)
-    uploaded = drive_service.files().create(body=file_meta, media_body=media, fields="id").execute()
-    return f"https://drive.google.com/file/d/{uploaded['id']}/view"
-
-
-def generate_tier_chart(ws, path):
-    tier_idx = None
-    for idx, cell in enumerate(next(ws.iter_rows(min_row=1, max_row=1))):
-        if "tier" in str(cell.value).lower():
-            tier_idx = idx
-            break
-    if tier_idx is None:
-        return
-    values = [str(row[tier_idx]).strip() for row in ws.iter_rows(min_row=2, values_only=True) if row[tier_idx]]
-    count = Counter(values)
-    plt.figure(figsize=(6, 4))
-    plt.bar(count.keys(), count.values())
-    plt.title("Tier Distribution")
-    plt.xlabel("Tier")
-    plt.ylabel("Count")
-    plt.tight_layout()
-    plt.savefig(path)
-    plt.close()
-
-
-def call_generate_api(session_id, score_summary, recommendations, key_findings):
-    payload = {
-        "session_id": session_id,
-        "score_summary": score_summary,
-        "recommendations": recommendations,
-        "key_findings": key_findings
-    }
+# === POST /start_assessment ===
+@app.route("/start_assessment", methods=["POST"])
+def start_assessment():
     try:
-        print("➡️ Payload to docx-generator-api:", payload)
-        r = requests.post(GENERATE_API_URL, json=payload)
-        r.raise_for_status()
-        return r.json()
+        data = request.get_json(force=True)
+        session_id = data.get("session_id")
+        email = data.get("email")
+        goal = data.get("goal", "N/A")
+        files = data.get("files", [])
+        webhook = data.get("next_action_webhook")
+
+        logging.info(f"📥 Received session: {session_id}, email: {email}, files: {len(files)}, webhook: {webhook}")
+
+        if not all([session_id, email, webhook, files]):
+            logging.error("❌ Missing required fields")
+            return jsonify({"error": "Missing required fields"}), 400
+
+        folder = session_id if session_id.startswith("Temp_") else f"Temp_{session_id}"
+        folder_path = os.path.join(BASE_DIR, folder)
+        os.makedirs(folder_path, exist_ok=True)
+        logging.info(f"📁 Session folder created: {folder_path}")
+
+        thread = threading.Thread(
+            target=process_assessment,
+            args=(session_id, email, files, webhook, folder_path),
+            daemon=True
+        )
+        thread.start()
+        logging.info("🚀 Background assessment thread started")
+
+        return jsonify({"message": "Assessment started"}), 200
     except Exception as e:
-        print(f"❌ DOCX/PPTX generation error: {e}")
-        traceback.print_exc()
-        return {}
+        logging.exception("🔥 Error in /start_assessment")
+        return jsonify({"error": str(e)}), 500
 
-
-def send_result_to_tracker(webhook, session_id, module, status, message, files):
-    payload = {
-        "session_id": session_id,
-        "gpt_module": module,
-        "status": status,
-        "message": message or ""
-    }
-    for i, (name, url) in enumerate(files.items(), start=1):
-        payload[f"file_{i}_name"] = name
-        payload[f"file_{i}_url"] = url
+# === Serve Output Files ===
+@app.route("/files/<path:filename>", methods=["GET"])
+def serve_file(filename):
     try:
-        r = requests.post(webhook, json=payload)
-        print(f"📤 Sent to tracker: {r.status_code}")
+        directory = os.path.join(BASE_DIR, os.path.dirname(filename))
+        file_only = os.path.basename(filename)
+        logging.info(f"📤 Serving file: {filename}")
+        return send_from_directory(directory, file_only)
     except Exception as e:
-        print(f"❌ Tracker send error: {e}")
-        traceback.print_exc()
+        logging.exception(f"❌ Error serving file: {filename}")
+        return jsonify({"error": str(e)}), 500
 
-
-def trigger_next_module(session_id, email, files):
-    payload = {"session_id": session_id, "email": email}
-    for i, (name, url) in enumerate(files.items(), start=1):
-        payload[f"file_{i}_name"] = name
-        payload[f"file_{i}_url"] = url
-    try:
-        r = requests.post(NEXT_API_URL, json=payload)
-        print(f"📱 Next module triggered: {r.status_code}")
-    except Exception as e:
-        print(f"❌ Next module trigger error: {e}")
-        traceback.print_exc()
-
-
-# === Main Handler ===
-def process_assessment(session_id, email, files, webhook, session_folder):
-    try:
-        print(f"🚀 Starting process_assessment: {session_id}")
-        os.makedirs(session_folder, exist_ok=True)
-
-        downloaded = {}
-        for f in files:
-            path = os.path.join(session_folder, f["file_name"])
-            download_file(f["file_url"], path)
-            downloaded[f["file_name"]] = path
-
-        hw_out = os.path.join(session_folder, f"HWGapAnalysis_{session_id}.xlsx")
-        sw_out = os.path.join(session_folder, f"SWGapAnalysis_{session_id}.xlsx")
-        chart_path = os.path.join(session_folder, "tier_chart.png")
-        tier_matrix_path = "ClassificationTier.xlsx"
-
-        # Load asset inventories from user files
-        asset_files = [v for k, v in downloaded.items() if "asset_inventory" in k.lower()]
-        df_assets = pd.concat([pd.read_csv(f) for f in asset_files if os.path.exists(f)], ignore_index=True)
-
-        # Load Tier Classification
-        df_tier = pd.read_excel(tier_matrix_path, sheet_name="Sheet1")
-        tier_map = dict(zip(df_tier["Classification Tier"], df_tier["Score"]))
-
-        # Enrich HW template
-        if os.path.exists(TEMPLATES["hw"]):
-            wb = load_workbook(TEMPLATES["hw"])
-            ws = wb["GAP_Working"] if "GAP_Working" in wb.sheetnames else wb.active
-            for i, row in enumerate(ws.iter_rows(min_row=3), start=3):
-                model_cell = row[3]  # assuming column D holds model name
-                if model_cell.value:
-                    model = str(model_cell.value).strip()
-                    tier = next((t for t in tier_map if t.lower() in model.lower()), None)
-                    row[29].value = tier  # assuming column AD is Tier Classification
-            wb.save(hw_out)
-
-        # Enrich SW template
-        if os.path.exists(TEMPLATES["sw"]):
-            wb = load_workbook(TEMPLATES["sw"])
-            ws = wb["GAP_Working"] if "GAP_Working" in wb.sheetnames else wb.active
-            for i, row in enumerate(ws.iter_rows(min_row=3), start=3):
-                model_cell = row[3]  # assuming column D holds software name/version
-                if model_cell.value:
-                    model = str(model_cell.value).strip()
-                    tier = next((t for t in tier_map if t.lower() in model.lower()), None)
-                    row[22].value = tier  # assuming column W is Tier Classification
-            wb.save(sw_out)
-
-        summary = "Excellent: 20%, Advanced: 40%, Standard: 30%, Obsolete: 10%"
-        recommendations = "Decommission Tier 1 servers. Migrate Tier 2 workloads to cloud."
-        findings = "Some critical workloads run on obsolete platforms."
-
-        doc_gen = call_generate_api(session_id, summary, recommendations, findings)
-        docx_url = doc_gen.get("docx_url")
-        pptx_url = doc_gen.get("pptx_url")
-
-        files_out = {
-            os.path.basename(hw_out): upload_to_drive(hw_out, session_id),
-            os.path.basename(sw_out): upload_to_drive(sw_out, session_id),
-            "IT_Current_Status_Assessment_Report.docx": docx_url,
-            "IT_Current_Status_Executive_Report.pptx": pptx_url
-        }
-
-        send_result_to_tracker(webhook, session_id, "it_assessment", "complete", "Assessment completed", files_out)
-        trigger_next_module(session_id, email, files_out)
-
-    except Exception as e:
-        print(f"🔥 Unhandled error: {e}")
-        traceback.print_exc()
+# === Main Entry Point ===
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    logging.info(f"🚦 Starting IT Assessment API on port {port}...")
+    app.run(host="0.0.0.0", port=port)
