@@ -41,6 +41,17 @@ def health():
 def start_assessment():
     try:
         data = request.get_json(force=True)
+        # ... rest of your logic ...
+    except Exception as e:
+        logging.exception("🔥 Error in /start_assessment")
+        return jsonify({"error": str(e)}), 500
+
+# === Alias: POST /trigger_assessment ===
+@app.route("/trigger_assessment", methods=["POST"])
+def trigger_assessment_alias():
+    return start_assessment()
+    try:
+        data = request.get_json(force=True)
         session_id = data.get("session_id")
         email = data.get("email")
         goal = data.get("goal", "N/A")
