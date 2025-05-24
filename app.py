@@ -37,8 +37,8 @@ def health():
     return "✅ IT Assessment API is live", 200
 
 # === POST /start_assessment ===
-@app.route("/start_assessment", methods=["POST"])
-def start_assessment():
+@app.route("/process_assessment", methods=["POST"])
+def process_assessment():
     try:
         data = request.get_json(force=True)
         session_id = data.get("session_id")
