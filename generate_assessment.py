@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from docx import Document
 from pptx import Presentation
 from pptx.util import Inches
-from openpyxl import load_workbook, Workbook
+from openpyxl import load_workbook
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -30,7 +30,6 @@ except Exception as e:
     traceback.print_exc()
 
 # === Constants ===
-REQUIRED_FILE_TYPES = {"asset_inventory", "gap_working"}
 TEMPLATES = {
     "hw": "templates/HWGapAnalysis.xlsx",
     "sw": "templates/SWGapAnalysis.xlsx"
@@ -38,6 +37,7 @@ TEMPLATES = {
 GENERATE_API_URL = "https://docx-generator-api.onrender.com/generate_assessment"
 PUBLIC_BASE_URL = "https://it-assessment-api.onrender.com/files"
 NEXT_API_URL = "https://market-gap-analysis.onrender.com/start_market_gap"
+
 
 def download_file(url, dest_path):
     try:
@@ -49,6 +49,7 @@ def download_file(url, dest_path):
     except Exception as e:
         print(f"❌ Download error: {e}")
         traceback.print_exc()
+
 
 def get_or_create_drive_folder(folder_name):
     query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder'"
@@ -62,6 +63,7 @@ def get_or_create_drive_folder(folder_name):
     ).execute()
     return folder["id"]
 
+
 def upload_to_drive(file_path, session_id):
     if not drive_service or not os.path.exists(file_path):
         return None
@@ -70,6 +72,7 @@ def upload_to_drive(file_path, session_id):
     media = MediaFileUpload(file_path, resumable=True)
     uploaded = drive_service.files().create(body=file_meta, media_body=media, fields="id").execute()
     return f"https://drive.google.com/file/d/{uploaded['id']}/view"
+
 
 def generate_tier_chart(ws, path):
     tier_idx = None
@@ -90,6 +93,7 @@ def generate_tier_chart(ws, path):
     plt.savefig(path)
     plt.close()
 
+
 def call_generate_api(session_id, score_summary, recommendations, key_findings):
     payload = {
         "session_id": session_id,
@@ -106,6 +110,7 @@ def call_generate_api(session_id, score_summary, recommendations, key_findings):
         print(f"❌ DOCX/PPTX generation error: {e}")
         traceback.print_exc()
         return {}
+
 
 def send_result_to_tracker(webhook, session_id, module, status, message, files):
     payload = {
@@ -124,6 +129,7 @@ def send_result_to_tracker(webhook, session_id, module, status, message, files):
         print(f"❌ Tracker send error: {e}")
         traceback.print_exc()
 
+
 def trigger_next_module(session_id, email, files):
     payload = {"session_id": session_id, "email": email}
     for i, (name, url) in enumerate(files.items(), start=1):
@@ -131,24 +137,11 @@ def trigger_next_module(session_id, email, files):
         payload[f"file_{i}_url"] = url
     try:
         r = requests.post(NEXT_API_URL, json=payload)
-        print(f"📡 Next module triggered: {r.status_code}")
+        print(f"📱 Next module triggered: {r.status_code}")
     except Exception as e:
         print(f"❌ Next module trigger error: {e}")
         traceback.print_exc()
 
-# === NEW: Generate GAP Working Sheet ===
-def generate_gap_working(inventory_path, tier_matrix_path, output_path):
-    df_inv = pd.read_csv(inventory_path)
-    df_tier = pd.read_excel(tier_matrix_path)
-
-    df_merged = df_inv.merge(df_tier, how='left', left_on='Model', right_on='Model')
-    df_merged["Age"] = 2025 - df_merged["Year"]
-    df_merged["Obsolete"] = df_merged["Tier"].apply(lambda x: "Yes" if str(x).strip().lower() in ["basic", "1"] else "No")
-
-    cols = ["Asset ID", "Category", "Vendor", "Model", "Year", "Age", "Tier", "Obsolete", "Location", "Function"]
-    df_merged = df_merged[[col for col in cols if col in df_merged.columns]]
-    df_merged.to_excel(output_path, index=False)
-    print(f"✅ GAP working file created: {output_path}")
 
 # === Main Handler ===
 def process_assessment(session_id, email, files, webhook, session_folder):
@@ -165,22 +158,39 @@ def process_assessment(session_id, email, files, webhook, session_folder):
         hw_out = os.path.join(session_folder, f"HWGapAnalysis_{session_id}.xlsx")
         sw_out = os.path.join(session_folder, f"SWGapAnalysis_{session_id}.xlsx")
         chart_path = os.path.join(session_folder, "tier_chart.png")
-        gap_out = os.path.join(session_folder, f"assessment_gap_working.xlsx")
         tier_matrix_path = "ClassificationTier.xlsx"
 
+        # Load asset inventories from user files
+        asset_files = [v for k, v in downloaded.items() if "asset_inventory" in k.lower()]
+        df_assets = pd.concat([pd.read_csv(f) for f in asset_files if os.path.exists(f)], ignore_index=True)
+
+        # Load Tier Classification
+        df_tier = pd.read_excel(tier_matrix_path, sheet_name="Sheet1")
+        tier_map = dict(zip(df_tier["Classification Tier"], df_tier["Score"]))
+
+        # Enrich HW template
         if os.path.exists(TEMPLATES["hw"]):
             wb = load_workbook(TEMPLATES["hw"])
             ws = wb["GAP_Working"] if "GAP_Working" in wb.sheetnames else wb.active
-            generate_tier_chart(ws, chart_path)
+            for i, row in enumerate(ws.iter_rows(min_row=3), start=3):
+                model_cell = row[3]  # assuming column D holds model name
+                if model_cell.value:
+                    model = str(model_cell.value).strip()
+                    tier = next((t for t in tier_map if t.lower() in model.lower()), None)
+                    row[29].value = tier  # assuming column AD is Tier Classification
             wb.save(hw_out)
 
+        # Enrich SW template
         if os.path.exists(TEMPLATES["sw"]):
             wb = load_workbook(TEMPLATES["sw"])
+            ws = wb["GAP_Working"] if "GAP_Working" in wb.sheetnames else wb.active
+            for i, row in enumerate(ws.iter_rows(min_row=3), start=3):
+                model_cell = row[3]  # assuming column D holds software name/version
+                if model_cell.value:
+                    model = str(model_cell.value).strip()
+                    tier = next((t for t in tier_map if t.lower() in model.lower()), None)
+                    row[22].value = tier  # assuming column W is Tier Classification
             wb.save(sw_out)
-
-        asset_inv_path = next((p for name, p in downloaded.items() if "asset" in name.lower()), None)
-        if asset_inv_path and os.path.exists(tier_matrix_path):
-            generate_gap_working(asset_inv_path, tier_matrix_path, gap_out)
 
         summary = "Excellent: 20%, Advanced: 40%, Standard: 30%, Obsolete: 10%"
         recommendations = "Decommission Tier 1 servers. Migrate Tier 2 workloads to cloud."
@@ -193,7 +203,6 @@ def process_assessment(session_id, email, files, webhook, session_folder):
         files_out = {
             os.path.basename(hw_out): upload_to_drive(hw_out, session_id),
             os.path.basename(sw_out): upload_to_drive(sw_out, session_id),
-            os.path.basename(gap_out): upload_to_drive(gap_out, session_id),
             "IT_Current_Status_Assessment_Report.docx": docx_url,
             "IT_Current_Status_Executive_Report.pptx": pptx_url
         }
