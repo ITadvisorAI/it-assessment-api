@@ -86,7 +86,7 @@ def process_assessment(session_id, email, files, webhook, session_folder):
             r = requests.get(f["file_url"], timeout=10)
             with open(path, "wb") as fp:
                 fp.write(r.content)
-            downloaded[f["file_name"]] = path
+            downloaded[f"file_name"] = path
 
         tier_matrix = pd.read_excel("ClassificationTier.xlsx", sheet_name="Sheet1")
         tier_map = {str(row["Classification Tier"]).lower(): row["Score"] for _, row in tier_matrix.iterrows()}
@@ -141,11 +141,20 @@ def process_assessment(session_id, email, files, webhook, session_folder):
             payload[f"file_{i}_url"] = furl
         requests.post(webhook, json=payload)
 
-        # Trigger next GPT
+        # Trigger next GPT (Market GAP)
+        files_for_gpt3 = [
+            {"file_name": os.path.basename(hw_out), "file_url": results[os.path.basename(hw_out)], "file_type": "gap_hw"},
+            {"file_name": os.path.basename(sw_out), "file_url": results[os.path.basename(sw_out)], "file_type": "gap_sw"},
+            {"file_name": "IT_Current_Status_Assessment_Report.docx", "file_url": results["IT_Current_Status_Assessment_Report.docx"], "file_type": "docx"},
+            {"file_name": "IT_Current_Status_Executive_Report.pptx", "file_url": results["IT_Current_Status_Executive_Report.pptx"], "file_type": "pptx"}
+        ]
+
         requests.post("https://market-gap-analysis.onrender.com/start_market_gap", json={
             "session_id": session_id,
             "email": email,
-            **payload
+            "gpt_module": "gap_market",
+            "files": files_for_gpt3,
+            "next_action_webhook": webhook
         })
 
     except Exception as e:
