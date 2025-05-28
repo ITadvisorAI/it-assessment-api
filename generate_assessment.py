@@ -57,6 +57,24 @@ def upload_to_drive(file_path, session_id):
         return None
 
 # === DOCX/PPTX Generation Call ===
+
+import time
+import requests
+
+def wait_for_docx_service(url, timeout=60):
+    print("⏳ Waiting for DOCX service to warm up...")
+    start = time.time()
+    while time.time() - start < timeout:
+        try:
+            r = requests.head(url, timeout=5)
+            if r.status_code == 200:
+                print("✅ DOCX service is ready")
+                return True
+        except:
+            pass
+        time.sleep(3)
+    raise Exception("❌ DOCX service did not become ready")
+
 def call_generate_api(session_id, summary, recommendations, findings):
     payload = {
         "session_id": session_id,
@@ -65,98 +83,17 @@ def call_generate_api(session_id, summary, recommendations, findings):
         "key_findings": findings
     }
     try:
-        print("➡️ Calling DOCX generator")
-        r = requests.post("https://docx-generator-api.onrender.com/generate_assessment", json=payload)
-        r.raise_for_status()
-        return r.json()
+        wait_for_docx_service("https://docx-generator-api.onrender.com/")
+        for attempt in range(3):
+            try:
+                print(f"➡️ Attempt {attempt+1}: Calling DOCX generator...")
+                r = requests.post("https://docx-generator-api.onrender.com/generate_assessment", json=payload, timeout=30)
+                r.raise_for_status()
+                return r.json()
+            except requests.exceptions.RequestException as e:
+                print(f"❌ Attempt {attempt+1} failed: {e}")
+                time.sleep(5 * (attempt + 1))  # Exponential backoff
+        raise Exception("❌ All retries failed for DOCX generator API")
     except Exception as e:
         print(f"❌ DOCX/PPTX generation failed: {e}")
-        traceback.print_exc()
         return {}
-
-# === Main Assessment Function ===
-def process_assessment(session_id, email, files, webhook, session_folder):
-    try:
-        print(f"🚀 Processing assessment for session: {session_id}")
-        os.makedirs(session_folder, exist_ok=True)
-
-        downloaded = {}
-        for f in files:
-            path = os.path.join(session_folder, f["file_name"])
-            r = requests.get(f["file_url"], timeout=10)
-            with open(path, "wb") as fp:
-                fp.write(r.content)
-            downloaded[f"file_name"] = path
-
-        tier_matrix = pd.read_excel("ClassificationTier.xlsx", sheet_name="Sheet1")
-        tier_map = {str(row["Classification Tier"]).lower(): row["Score"] for _, row in tier_matrix.iterrows()}
-
-        # Process HW
-        hw_template = "templates/HWGapAnalysis.xlsx"
-        hw_out = os.path.join(session_folder, f"HWGapAnalysis_{session_id}.xlsx")
-        if os.path.exists(hw_template):
-            wb = load_workbook(hw_template)
-            ws = wb["GAP_Working"] if "GAP_Working" in wb.sheetnames else wb.active
-            for row in ws.iter_rows(min_row=3):
-                model = str(row[3].value).lower() if row[3].value else ""
-                match = next((tier for tier in tier_map if tier in model), None)
-                row[29].value = match
-            wb.save(hw_out)
-
-        # Process SW
-        sw_template = "templates/SWGapAnalysis.xlsx"
-        sw_out = os.path.join(session_folder, f"SWGapAnalysis_{session_id}.xlsx")
-        if os.path.exists(sw_template):
-            wb = load_workbook(sw_template)
-            ws = wb["GAP_Working"] if "GAP_Working" in wb.sheetnames else wb.active
-            for row in ws.iter_rows(min_row=3):
-                sw = str(row[3].value).lower() if row[3].value else ""
-                match = next((tier for tier in tier_map if tier in sw), None)
-                row[22].value = match
-            wb.save(sw_out)
-
-        # Call docx generator
-        summary = "Excellent: 20%, Advanced: 40%, Standard: 30%, Obsolete: 10%"
-        recommendations = "Decommission Tier 1 servers. Migrate Tier 2 workloads to cloud."
-        findings = "Some critical workloads run on obsolete platforms."
-        doc_gen = call_generate_api(session_id, summary, recommendations, findings)
-
-        # Upload all
-        results = {
-            os.path.basename(hw_out): upload_to_drive(hw_out, session_id),
-            os.path.basename(sw_out): upload_to_drive(sw_out, session_id),
-            "IT_Current_Status_Assessment_Report.docx": doc_gen.get("docx_url"),
-            "IT_Current_Status_Executive_Report.pptx": doc_gen.get("pptx_url")
-        }
-
-        # Send back to webhook
-        payload = {
-            "session_id": session_id,
-            "gpt_module": "it_assessment",
-            "status": "complete",
-            "message": "Assessment completed"
-        }
-        for i, (fname, furl) in enumerate(results.items(), start=1):
-            payload[f"file_{i}_name"] = fname
-            payload[f"file_{i}_url"] = furl
-        requests.post(webhook, json=payload)
-
-        # Trigger next GPT (Market GAP)
-        files_for_gpt3 = [
-            {"file_name": os.path.basename(hw_out), "file_url": results[os.path.basename(hw_out)], "file_type": "gap_hw"},
-            {"file_name": os.path.basename(sw_out), "file_url": results[os.path.basename(sw_out)], "file_type": "gap_sw"},
-            {"file_name": "IT_Current_Status_Assessment_Report.docx", "file_url": results["IT_Current_Status_Assessment_Report.docx"], "file_type": "docx"},
-            {"file_name": "IT_Current_Status_Executive_Report.pptx", "file_url": results["IT_Current_Status_Executive_Report.pptx"], "file_type": "pptx"}
-        ]
-
-        requests.post("https://market-gap-analysis.onrender.com/start_market_gap", json={
-            "session_id": session_id,
-            "email": email,
-            "gpt_module": "gap_market",
-            "files": files_for_gpt3,
-            "next_action_webhook": webhook
-        })
-
-    except Exception as e:
-        print(f"🔥 Unhandled error in process_assessment: {e}")
-        traceback.print_exc()
