@@ -1,3 +1,4 @@
+
 import os
 import threading
 import logging
@@ -31,10 +32,14 @@ if os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON"):
 else:
     logging.info("🔕 Google Drive not configured")
 
-# === Health Check ===
+# === Health Check (GET and HEAD) ===
 @app.route("/", methods=["GET"])
 def health():
     return "✅ IT Assessment API is live", 200
+
+@app.route("/", methods=["HEAD"])
+def health_head():
+    return "", 200
 
 # === POST /start_assessment ===
 @app.route("/start_assessment", methods=["POST"])
@@ -58,10 +63,12 @@ def start_assessment():
         os.makedirs(folder_path, exist_ok=True)
         logging.info(f"📁 Session folder created: {folder_path}")
 
+        # Start background thread with named identifier
         thread = threading.Thread(
             target=process_assessment,
             args=(session_id, email, files, webhook, folder_path),
-            daemon=True
+            daemon=True,
+            name=f"assessment-{session_id}"
         )
         thread.start()
         logging.info("🚀 Background assessment thread started")
