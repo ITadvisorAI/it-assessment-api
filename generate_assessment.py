@@ -1,6 +1,6 @@
 import os
 import json
-import threading
+import time
 import traceback
 import pandas as pd
 import requests
@@ -60,7 +60,6 @@ def upload_to_drive(file_path, session_id):
 # === DOCX/PPTX Generation Call ===
 def wait_for_docx_service(url, timeout=60):
     print("⏳ Waiting for DOCX service to warm up...")
-    import time
     start = time.time()
     while time.time() - start < timeout:
         try:
@@ -90,33 +89,40 @@ def call_generate_api(session_id, summary, recommendations, findings):
                 return r.json()
             except requests.exceptions.RequestException as e:
                 print(f"❌ Attempt {attempt+1} failed: {e}")
-                import time
                 time.sleep(5 * (attempt + 1))
         raise Exception("❌ All retries failed for DOCX generator API")
     except Exception as e:
         print(f"❌ DOCX/PPTX generation failed: {e}")
         return {}
 
-# === Main Assessment Function ===
-def process_assessment(session_id, files, email, summary=None, recommendations=None):
+# === Main Assessment Processor ===
+def process_assessment(session_id, files, email):
     try:
         print(f"🚀 Processing assessment for session: {session_id}")
 
-        # Dummy device classification summary for testing
-        summary_count = {"basic": 0, "standard": 0, "advanced": 0, "excellent": 0}
+        # Example parsing stub — you can extend this
+        hw_file = next((f["path"] for f in files if "hardware" in f["type"]), None)
+        sw_file = next((f["path"] for f in files if "software" in f["type"]), None)
+
+        hw_df = pd.read_excel(hw_file) if hw_file else pd.DataFrame()
+        sw_df = pd.read_excel(sw_file) if sw_file else pd.DataFrame()
+
+        # === Analyze tiers ===
+        summary_count = hw_df['Tier'].value_counts().to_dict() if 'Tier' in hw_df else {}
         total = sum(summary_count.values())
         if total == 0:
-            summary_text = "No device data available."
+            summary = "No tier data available"
         else:
-            summary_text = ", ".join([f"{tier.capitalize()}: {int((count / total) * 100)}%" for tier, count in summary_count.items()])
+            summary = ", ".join([f"{tier.capitalize()}: {int((count / total) * 100)}%" for tier, count in summary_count.items()])
 
-        recommendations = recommendations or "Upgrade legacy systems. Modernize software stack. Enhance security."
-        findings = "Many devices are outdated and no longer supported. Gaps exist in scalability, cost, and performance."
+        recommendations = "Consider upgrading Tier 4 and obsolete hardware to modern equivalents."
+        findings = f"{len(hw_df)} hardware entries analyzed, {len(sw_df)} software entries analyzed."
 
-        # Call DOCX/PPTX generator
-        result = call_generate_api(session_id, summary_text, recommendations, findings)
-        print("✅ Document generation result:", result)
-
+        # === Generate documents via external generator ===
+        result = call_generate_api(session_id, summary, recommendations, findings)
+        print("✅ Result URLs:", result)
+        return result
     except Exception as e:
         print(f"🔥 Unhandled error in process_assessment: {e}")
         traceback.print_exc()
+        return {}
