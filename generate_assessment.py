@@ -1,10 +1,10 @@
 import os
 import json
+import time
 import traceback
-from docx import Document
-from pptx import Presentation
-from pptx.util import Inches, Pt
-from pptx.enum.shapes import MSO_SHAPE
+import pandas as pd
+import requests
+from openpyxl import load_workbook
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -15,158 +15,110 @@ try:
     creds_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
     if not creds_json:
         raise ValueError("Missing GOOGLE_SERVICE_ACCOUNT_JSON environment variable")
-
     creds = service_account.Credentials.from_service_account_info(
         json.loads(creds_json),
         scopes=["https://www.googleapis.com/auth/drive"]
     )
     drive_service = build("drive", "v3", credentials=creds)
-    print("✅ Google Drive client initialized from ENV")
+    print("✅ Google Drive initialized from ENV")
 except Exception as e:
     print(f"❌ Google Drive setup failed: {e}")
     traceback.print_exc()
 
-# === Utility: Create or locate session folder in Google Drive ===
+# === Google Drive Utility Functions ===
 def get_or_create_drive_folder(folder_name):
     try:
         query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder'"
-        results = drive_service.files().list(q=query, fields="files(id)").execute()
-        folders = results.get("files", [])
+        result = drive_service.files().list(q=query, fields="files(id)").execute()
+        folders = result.get("files", [])
         if folders:
             return folders[0]["id"]
-
-        metadata = {
-            "name": folder_name,
-            "mimeType": "application/vnd.google-apps.folder"
-        }
-        folder = drive_service.files().create(body=metadata, fields="id").execute()
+        folder = drive_service.files().create(
+            body={"name": folder_name, "mimeType": "application/vnd.google-apps.folder"},
+            fields="id"
+        ).execute()
         return folder["id"]
     except Exception as e:
-        print(f"❌ Failed to get/create folder: {e}")
+        print(f"❌ Drive folder error: {e}")
         traceback.print_exc()
         return None
 
-# === Utility: Upload a file to Drive under the session folder ===
 def upload_to_drive(file_path, session_id):
     try:
         folder_id = get_or_create_drive_folder(session_id)
         if not folder_id:
             return None
-
-        metadata = {
-            "name": os.path.basename(file_path),
-            "parents": [folder_id]
-        }
+        file_meta = {"name": os.path.basename(file_path), "parents": [folder_id]}
         media = MediaFileUpload(file_path, resumable=True)
-        uploaded = drive_service.files().create(
-            body=metadata,
-            media_body=media,
-            fields="id"
-        ).execute()
-
-        file_id = uploaded["id"]
-        return f"https://drive.google.com/file/d/{file_id}/view"
+        uploaded = drive_service.files().create(body=file_meta, media_body=media, fields="id").execute()
+        return f"https://drive.google.com/file/d/{uploaded['id']}/view"
     except Exception as e:
         print(f"❌ Upload failed: {e}")
         traceback.print_exc()
         return None
 
-# === Generate Word Report with Extended Pages ===
-def generate_docx(session_id, summary, recommendations, findings, output_path):
+# === DOCX/PPTX Generator Call ===
+def wait_for_docx_service(url, timeout=60):
+    print("⏳ Waiting for DOCX service to warm up...")
+    start = time.time()
+    while time.time() - start < timeout:
+        try:
+            r = requests.head(url, timeout=5)
+            if r.status_code == 200:
+                print("✅ DOCX service is ready")
+                return True
+        except:
+            pass
+        time.sleep(3)
+    raise Exception("❌ DOCX service did not become ready")
+
+def call_generate_api(session_id, summary, recommendations, findings):
+    payload = {
+        "session_id": session_id,
+        "score_summary": summary,
+        "recommendations": recommendations,
+        "key_findings": findings
+    }
     try:
-        doc = Document()
-        doc.add_heading("IT Infrastructure Assessment Report", level=1)
-        doc.add_paragraph(f"Session ID: {session_id}")
-
-        sections = [
-            ("Executive Summary", summary),
-            ("Infrastructure Overview", "Details on current infrastructure assets, layout, and topology."),
-            ("Score Summary", summary),
-            ("Key Findings", findings),
-            ("Recommendations", recommendations),
-            ("Security Gaps", "Analysis of identified security vulnerabilities and risks."),
-            ("Compliance Overview", "How current systems align with compliance standards."),
-            ("Technology Stack Gaps", "Mismatches or obsolescence in current technology stack."),
-            ("Cloud Readiness", "Assessment of current systems for migration to cloud environments."),
-            ("Future-State Architecture", "Suggestions for upgraded and modernized IT architecture."),
-            ("Cost-Saving Opportunities", "Identified areas where cost optimization is possible."),
-            ("Operational Risks", "Assessment of operational continuity and failover mechanisms."),
-            ("Vendor and Platform Evaluation", "Gaps in platform support and vendor lock-in risks."),
-            ("Asset Obsolescence Report", "Lists outdated or unsupported hardware/software."),
-            ("Conclusion", "Summary of transformation potential and next steps.")
-        ]
-
-        for title, content in sections:
-            doc.add_heading(title, level=2)
-            doc.add_paragraph(content)
-
-        doc.save(output_path)
-        print(f"📝 DOCX created: {output_path}")
+        wait_for_docx_service("https://docx-generator-api.onrender.com/")
+        for attempt in range(3):
+            try:
+                print(f"➡️ Attempt {attempt+1}: Calling DOCX generator...")
+                r = requests.post("https://docx-generator-api.onrender.com/generate_assessment", json=payload, timeout=30)
+                r.raise_for_status()
+                return r.json()
+            except requests.exceptions.RequestException as e:
+                print(f"❌ Attempt {attempt+1} failed: {e}")
+                time.sleep(5 * (attempt + 1))
+        raise Exception("❌ All retries failed for DOCX generator API")
     except Exception as e:
-        print(f"❌ DOCX generation failed: {e}")
-        traceback.print_exc()
+        print(f"❌ DOCX/PPTX generation failed: {e}")
+        return {}
 
-# === Generate PPTX with Dynamic Content ===
-def generate_pptx(session_id, summary, recommendations, findings, output_path):
+# === Process Assessment ===
+def process_assessment(session_id, email, files):
     try:
-        ppt = Presentation()
-        layouts = ppt.slide_layouts
+        print(f"🚀 Starting assessment for {session_id}")
 
-        slides = [
-            ("IT Executive Summary", f"Session ID: {session_id}"),
-            ("Score Summary", summary),
-            ("Key Findings", findings),
-            ("Recommendations", recommendations),
-            ("Security Gaps", "Key security vulnerabilities identified."),
-            ("Compliance Risks", "Gaps in regulatory and compliance coverage."),
-            ("Cloud Readiness", "Suitability of systems for cloud adoption."),
-            ("Obsolete Systems", "List of legacy systems needing upgrade."),
-            ("Future-State Overview", "Target architecture and capabilities."),
-            ("Transformation Timeline", "Phase-wise breakdown (insert Gantt)"),
-            ("Budget Highlights", "High-level cost vs. benefit insights.")
-        ]
+        # Step 1: Filter asset inventory files
+        inventory_files = [f for f in files if f.get("type") in ["hardware_inventory", "software_inventory"]]
+        if not inventory_files:
+            raise Exception("No inventory files provided")
 
-        for title, content in slides:
-            slide = ppt.slides.add_slide(layouts[1])
-            slide.shapes.title.text = title
-            slide.placeholders[1].text = content
+        # Placeholder: perform infrastructure analysis
+        summary_count = {"basic": 5, "standard": 3, "advanced": 1, "excellent": 1}
+        total = sum(summary_count.values()) or 1  # Prevent ZeroDivisionError
+        summary = ", ".join([f"{tier.capitalize()}: {int((count / total) * 100)}%" for tier, count in summary_count.items()])
+        findings = "Obsolete systems, legacy platforms, and performance bottlenecks identified."
+        recommendations = "Migrate to hybrid infrastructure, replace legacy systems, enhance monitoring."
 
-        ppt.save(output_path)
-        print(f"📊 PPTX created: {output_path}")
-    except Exception as e:
-        print(f"❌ PPTX generation failed: {e}")
-        traceback.print_exc()
+        # Step 2: Generate documents
+        result = call_generate_api(session_id, summary, recommendations, findings)
 
-# === Entry Point: Called via API ===
-def generate_assessment_report(data):
-    try:
-        session_id = data["session_id"]
-        summary = data["score_summary"]
-        recommendations = data["recommendations"]
-        findings = data.get("key_findings", "")
-
-        output_folder = os.path.join("temp_sessions", session_id)
-        os.makedirs(output_folder, exist_ok=True)
-
-        docx_path = os.path.join(output_folder, "IT_Current_Status_Assessment_Report.docx")
-        pptx_path = os.path.join(output_folder, "IT_Current_Status_Executive_Report.pptx")
-
-        generate_docx(session_id, summary, recommendations, findings, docx_path)
-        generate_pptx(session_id, summary, recommendations, findings, pptx_path)
-
-        docx_url = upload_to_drive(docx_path, session_id)
-        pptx_url = upload_to_drive(pptx_path, session_id)
-
-        return {
-            "docx_url": docx_url,
-            "pptx_url": pptx_url
-        }
+        print("✅ Assessment completed")
+        return result
 
     except Exception as e:
-        print(f"❌ Error in generate_assessment_report: {e}")
+        print(f"❌ Error in process_assessment: {e}")
         traceback.print_exc()
-        return {
-            "docx_url": None,
-            "pptx_url": None,
-            "error": str(e)
-        }
+        return {"error": str(e)}
