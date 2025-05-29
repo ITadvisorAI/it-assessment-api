@@ -1,5 +1,3 @@
-# visualization.py
-
 import os
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -24,6 +22,7 @@ def plot_tier_distribution(df, gap_type, session_id):
         path = os.path.join(chart_dir, f"{gap_type.lower()}_tier_distribution.png")
         safe_plot_save(fig, path)
         return path
+    print(f"⚠️ No valid Tier data found for {gap_type}")
     return None
 
 def plot_environment_distribution(df, gap_type, session_id):
@@ -39,6 +38,7 @@ def plot_environment_distribution(df, gap_type, session_id):
         path = os.path.join(chart_dir, f"{gap_type.lower()}_environment_distribution.png")
         safe_plot_save(fig, path)
         return path
+    print(f"⚠️ No valid environment data found for {gap_type}")
     return None
 
 def plot_device_type_by_tier(df, session_id):
@@ -51,6 +51,7 @@ def plot_device_type_by_tier(df, session_id):
         path = os.path.join(chart_dir, "hw_device_type_vs_tier.png")
         safe_plot_save(fig, path)
         return path
+    print("⚠️ 'Hardware Type' or 'Tier' column missing for HW device chart")
     return None
 
 def generate_hw_charts(hw_path, session_id):
