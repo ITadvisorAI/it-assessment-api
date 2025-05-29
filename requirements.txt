@@ -10,3 +10,13 @@ google-auth>=2.27.0
 google-auth-httplib2>=0.2.0
 google-auth-oauthlib>=1.2.0
 pandas>=2.2.0
+googleapis-common-protos==1.70.0
+httplib2==0.22.0
+protobuf==6.31.1
+proto-plus==1.26.1
+pyasn1==0.6.1
+pyasn1-modules==0.4.2
+six==1.17.0
+cachetools==5.3.3
+uritemplate==4.1.1
+python-dateutil==2.9.0.post0
