@@ -9,6 +9,9 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
+BASE_DIR = "temp_sessions"
+tier_matrix_path = "ClassificationTier.xlsx"
+
 # === Google Drive Setup ===
 drive_service = None
 try:
@@ -25,7 +28,6 @@ except Exception as e:
     print(f"❌ Google Drive setup failed: {e}")
     traceback.print_exc()
 
-# === Utility: Google Drive Upload ===
 def get_or_create_drive_folder(folder_name):
     try:
         query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder'"
@@ -57,7 +59,6 @@ def upload_to_drive(file_path, session_id):
         traceback.print_exc()
         return None
 
-# === DOCX/PPTX Generation Call ===
 def wait_for_docx_service(url, timeout=60):
     print("⏳ Waiting for DOCX service to warm up...")
     start = time.time()
@@ -95,32 +96,52 @@ def call_generate_api(session_id, summary, recommendations, findings):
         print(f"❌ DOCX/PPTX generation failed: {e}")
         return {}
 
-# === Main Assessment Processor ===
+def classify_devices(df, tier_df, is_hw=True):
+    if df.empty:
+        return df
+    df['Tier'] = 'Unknown'
+    for _, row in tier_df.iterrows():
+        keyword = row['Keyword'].lower()
+        tier = row['Tier']
+        mask = df.apply(lambda x: keyword in str(x).lower(), axis=1)
+        df.loc[mask, 'Tier'] = tier
+    return df
+
 def process_assessment(session_id, files, email):
     try:
         print(f"🚀 Processing assessment for session: {session_id}")
+        session_path = os.path.join(BASE_DIR, session_id)
+        os.makedirs(session_path, exist_ok=True)
 
-        # Example parsing stub — you can extend this
         hw_file = next((f["path"] for f in files if "hardware" in f["type"]), None)
         sw_file = next((f["path"] for f in files if "software" in f["type"]), None)
 
         hw_df = pd.read_excel(hw_file) if hw_file else pd.DataFrame()
         sw_df = pd.read_excel(sw_file) if sw_file else pd.DataFrame()
 
-        # === Analyze tiers ===
-        summary_count = hw_df['Tier'].value_counts().to_dict() if 'Tier' in hw_df else {}
-        total = sum(summary_count.values())
-        if total == 0:
-            summary = "No tier data available"
-        else:
-            summary = ", ".join([f"{tier.capitalize()}: {int((count / total) * 100)}%" for tier, count in summary_count.items()])
+        tier_df = pd.read_excel(tier_matrix_path)
 
-        recommendations = "Consider upgrading Tier 4 and obsolete hardware to modern equivalents."
-        findings = f"{len(hw_df)} hardware entries analyzed, {len(sw_df)} software entries analyzed."
+        hw_df = classify_devices(hw_df, tier_df, is_hw=True)
+        sw_df = classify_devices(sw_df, tier_df, is_hw=False)
 
-        # === Generate documents via external generator ===
+        hw_gap_path = os.path.join(session_path, f"HWGapAnalysis_{session_id}.xlsx")
+        sw_gap_path = os.path.join(session_path, f"SWGapAnalysis_{session_id}.xlsx")
+        hw_df.to_excel(hw_gap_path, index=False)
+        sw_df.to_excel(sw_gap_path, index=False)
+
+        hw_tier_summary = hw_df['Tier'].value_counts().to_dict()
+        total_hw = sum(hw_tier_summary.values())
+        summary = ", ".join([f"{k}: {int(v/total_hw*100)}%" for k, v in hw_tier_summary.items()]) if total_hw > 0 else "No hardware data available"
+
+        recommendations = "Upgrade all devices marked as Tier 4 or 'Unknown'. Consider phasing out legacy systems."
+        findings = f"{len(hw_df)} hardware entries and {len(sw_df)} software entries processed and classified."
+
         result = call_generate_api(session_id, summary, recommendations, findings)
-        print("✅ Result URLs:", result)
+
+        upload_to_drive(hw_gap_path, session_id)
+        upload_to_drive(sw_gap_path, session_id)
+
+        print("✅ Assessment completed for session:", session_id)
         return result
     except Exception as e:
         print(f"🔥 Unhandled error in process_assessment: {e}")
