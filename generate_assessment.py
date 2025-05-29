@@ -8,7 +8,9 @@ from openpyxl import load_workbook
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
-from visualization import generate_hw_charts, generate_sw_charts  # Chart module
+from visualization import generate_hw_charts, generate_sw_charts
+from report_docx import generate_docx_report
+from report_pptx import generate_pptx_report
 
 BASE_DIR = "temp_sessions"
 tier_matrix_path = "ClassificationTier.xlsx"
@@ -149,13 +151,26 @@ def process_assessment(session_id, files, email):
         recommendations = "Upgrade all devices marked as Tier 4 or 'Unknown'. Consider phasing out legacy systems."
         findings = f"{len(hw_df)} hardware entries and {len(sw_df)} software entries processed and classified."
 
-        result = call_generate_api(session_id, summary, recommendations, findings)
+        # ✅ Call DOCX generator API
+        api_result = call_generate_api(session_id, summary, recommendations, findings)
 
+        # ✅ Generate final Word and PowerPoint reports with charts
+        docx_path = generate_docx_report(session_id)
+        pptx_path = generate_pptx_report(session_id)
+
+        # ✅ Upload all artifacts to Google Drive
         upload_to_drive(hw_gap_path, session_id)
         upload_to_drive(sw_gap_path, session_id)
+        upload_to_drive(docx_path, session_id)
+        upload_to_drive(pptx_path, session_id)
 
         print("✅ Assessment completed for session:", session_id)
-        return result
+        return {
+            "status": "complete",
+            "docx": docx_path,
+            "pptx": pptx_path,
+            "api_response": api_result
+        }
     except Exception as e:
         print(f"🔥 Unhandled error in process_assessment: {e}")
         traceback.print_exc()
