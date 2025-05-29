@@ -1,3 +1,4 @@
+
 import os
 import json
 import time
@@ -8,6 +9,7 @@ from openpyxl import load_workbook
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
+from docx import Document
 from visualization import generate_hw_charts, generate_sw_charts
 from report_docx import generate_docx_report
 from report_pptx import generate_pptx_report
@@ -15,23 +17,46 @@ from report_pptx import generate_pptx_report
 BASE_DIR = "temp_sessions"
 tier_matrix_path = "ClassificationTier.xlsx"
 
-# === README-Based Instruction Mapping (simplified from docx)
-REQUIRED_COLUMNS_HW = [
-    "Asset ID", "Hardware Type", "Manufacturer", "Model",
-    "Processor / CPU Specs", "RAM (GB)", "Storage Capacity (Raw & Usable)",
-    "RAID / Disk Configuration", "Tier Classification", "Calculation",
-    "Latest Hardware Make", "Latest Hardware Model", "Latest HW Score 5",
-    "GAP Remediation cost"
-]
+def parse_readme_columns(docx_path):
+    try:
+        doc = Document(docx_path)
+        required = []
+        for para in doc.paragraphs:
+            if para.text.strip().startswith("- "):
+                column_name = para.text[2:].split(":")[0].strip()
+                required.append(column_name)
+        print(f"📄 Parsed {len(required)} columns from {docx_path}")
+        return required
+    except Exception as e:
+        print(f"❌ Failed to parse README {docx_path}: {e}")
+        return []
 
-REQUIRED_COLUMNS_SW = [
-    "Application ID", "Application Name", "Business Function", "Criticality",
-    "Hosting Type", "Cloud Provider", "Number of Users", "Authentication Method",
-    "Dependent Systems", "Tier Classification referencing tier metrix in ClassificationTier.xlsx",
-    "Total Score", "Latest operating System", "Latest OS Score (5)", "GAP Remediation cost"
-]
+def validate_columns(df, expected_columns, label="HW"):
+    missing = [col for col in expected_columns if col not in df.columns]
+    if missing:
+        print(f"❌ Missing columns in {label} file: {missing}")
+        return False, missing
+    print(f"✅ {label} columns validated")
+    return True, []
 
-# === Google Drive Setup ===
+def autofill_missing_columns(df, columns_defaults):
+    for col, default in columns_defaults.items():
+        if col not in df.columns:
+            print(f"⚠️ Auto-adding missing column: {col}")
+            df[col] = default
+    return df
+
+def classify_devices(df, tier_df, is_hw=True):
+    if df.empty:
+        return df
+    df['Tier'] = 'Unknown'
+    for _, row in tier_df.iterrows():
+        keyword = row['Keyword'].lower()
+        tier = row['Tier']
+        mask = df.apply(lambda x: keyword in str(x).lower(), axis=1)
+        df.loc[mask, 'Tier'] = tier
+    return df
+
 drive_service = None
 try:
     creds_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
@@ -115,25 +140,6 @@ def call_generate_api(session_id, summary, recommendations, findings):
         print(f"❌ DOCX/PPTX generation failed: {e}")
         return {}
 
-def classify_devices(df, tier_df, is_hw=True):
-    if df.empty:
-        return df
-    df['Tier'] = 'Unknown'
-    for _, row in tier_df.iterrows():
-        keyword = row['Keyword'].lower()
-        tier = row['Tier']
-        mask = df.apply(lambda x: keyword in str(x).lower(), axis=1)
-        df.loc[mask, 'Tier'] = tier
-    return df
-
-def validate_columns(df, expected_columns, label="HW"):
-    missing = [col for col in expected_columns if col not in df.columns]
-    if missing:
-        print(f"❌ Missing columns in {label} file: {missing}")
-        return False, missing
-    print(f"✅ {label} columns validated")
-    return True, []
-
 def process_assessment(session_id, files, email):
     try:
         print(f"🚀 Processing assessment for session: {session_id}")
@@ -149,7 +155,9 @@ def process_assessment(session_id, files, email):
         print("📥 HW Columns:", hw_df.columns.tolist())
         print("📥 SW Columns:", sw_df.columns.tolist())
 
-        # ✅ Validate columns before processing
+        REQUIRED_COLUMNS_HW = parse_readme_columns("README_HWGapAnalysis.docx")
+        REQUIRED_COLUMNS_SW = parse_readme_columns("README_SWGapAnalysis.docx")
+
         valid_hw, missing_hw = validate_columns(hw_df, REQUIRED_COLUMNS_HW, label="HW") if not hw_df.empty else (True, [])
         valid_sw, missing_sw = validate_columns(sw_df, REQUIRED_COLUMNS_SW, label="SW") if not sw_df.empty else (True, [])
 
@@ -161,8 +169,13 @@ def process_assessment(session_id, files, email):
                 "missing_sw": missing_sw
             }
 
-        tier_df = pd.read_excel(tier_matrix_path)
+        hw_defaults = {"Tier": "Unknown", "Total Score": 0, "Calculation": 0}
+        sw_defaults = {"Tier Classification referencing tier metrix in ClassificationTier.xlsx": "Unknown", "Total Score": 0}
 
+        hw_df = autofill_missing_columns(hw_df, hw_defaults)
+        sw_df = autofill_missing_columns(sw_df, sw_defaults)
+
+        tier_df = pd.read_excel(tier_matrix_path)
         hw_df = classify_devices(hw_df, tier_df, is_hw=True)
         sw_df = classify_devices(sw_df, tier_df, is_hw=False)
 
@@ -171,12 +184,10 @@ def process_assessment(session_id, files, email):
         hw_df.to_excel(hw_gap_path, index=False)
         sw_df.to_excel(sw_gap_path, index=False)
 
-        # ✅ Generate charts
         hw_charts = generate_hw_charts(hw_gap_path, session_id)
         sw_charts = generate_sw_charts(sw_gap_path, session_id)
         print("📊 Charts generated:", hw_charts + sw_charts)
 
-        # ✅ Summary logic with safety
         if 'Tier' in hw_df.columns and hw_df['Tier'].notnull().any():
             hw_tier_summary = hw_df['Tier'].value_counts().to_dict()
             total_hw = sum(hw_tier_summary.values())
@@ -189,11 +200,9 @@ def process_assessment(session_id, files, email):
 
         api_result = call_generate_api(session_id, summary, recommendations, findings)
 
-        # ✅ Generate DOCX and PPTX reports with charts
         docx_path = generate_docx_report(session_id)
         pptx_path = generate_pptx_report(session_id)
 
-        # ✅ Upload all outputs
         upload_to_drive(hw_gap_path, session_id)
         upload_to_drive(sw_gap_path, session_id)
         upload_to_drive(docx_path, session_id)
