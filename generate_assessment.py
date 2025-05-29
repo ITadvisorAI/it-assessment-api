@@ -15,6 +15,22 @@ from report_pptx import generate_pptx_report
 BASE_DIR = "temp_sessions"
 tier_matrix_path = "ClassificationTier.xlsx"
 
+# === README-Based Instruction Mapping (simplified from docx)
+REQUIRED_COLUMNS_HW = [
+    "Asset ID", "Hardware Type", "Manufacturer", "Model",
+    "Processor / CPU Specs", "RAM (GB)", "Storage Capacity (Raw & Usable)",
+    "RAID / Disk Configuration", "Tier Classification", "Calculation",
+    "Latest Hardware Make", "Latest Hardware Model", "Latest HW Score 5",
+    "GAP Remediation cost"
+]
+
+REQUIRED_COLUMNS_SW = [
+    "Application ID", "Application Name", "Business Function", "Criticality",
+    "Hosting Type", "Cloud Provider", "Number of Users", "Authentication Method",
+    "Dependent Systems", "Tier Classification referencing tier metrix in ClassificationTier.xlsx",
+    "Total Score", "Latest operating System", "Latest OS Score (5)", "GAP Remediation cost"
+]
+
 # === Google Drive Setup ===
 drive_service = None
 try:
@@ -110,6 +126,14 @@ def classify_devices(df, tier_df, is_hw=True):
         df.loc[mask, 'Tier'] = tier
     return df
 
+def validate_columns(df, expected_columns, label="HW"):
+    missing = [col for col in expected_columns if col not in df.columns]
+    if missing:
+        print(f"❌ Missing columns in {label} file: {missing}")
+        return False, missing
+    print(f"✅ {label} columns validated")
+    return True, []
+
 def process_assessment(session_id, files, email):
     try:
         print(f"🚀 Processing assessment for session: {session_id}")
@@ -124,6 +148,18 @@ def process_assessment(session_id, files, email):
 
         print("📥 HW Columns:", hw_df.columns.tolist())
         print("📥 SW Columns:", sw_df.columns.tolist())
+
+        # ✅ Validate columns before processing
+        valid_hw, missing_hw = validate_columns(hw_df, REQUIRED_COLUMNS_HW, label="HW") if not hw_df.empty else (True, [])
+        valid_sw, missing_sw = validate_columns(sw_df, REQUIRED_COLUMNS_SW, label="SW") if not sw_df.empty else (True, [])
+
+        if not valid_hw or not valid_sw:
+            return {
+                "status": "error",
+                "message": "Missing columns in uploaded files.",
+                "missing_hw": missing_hw,
+                "missing_sw": missing_sw
+            }
 
         tier_df = pd.read_excel(tier_matrix_path)
 
@@ -151,14 +187,13 @@ def process_assessment(session_id, files, email):
         recommendations = "Upgrade all devices marked as Tier 4 or 'Unknown'. Consider phasing out legacy systems."
         findings = f"{len(hw_df)} hardware entries and {len(sw_df)} software entries processed and classified."
 
-        # ✅ Call DOCX generator API
         api_result = call_generate_api(session_id, summary, recommendations, findings)
 
-        # ✅ Generate final Word and PowerPoint reports with charts
+        # ✅ Generate DOCX and PPTX reports with charts
         docx_path = generate_docx_report(session_id)
         pptx_path = generate_pptx_report(session_id)
 
-        # ✅ Upload all artifacts to Google Drive
+        # ✅ Upload all outputs
         upload_to_drive(hw_gap_path, session_id)
         upload_to_drive(sw_gap_path, session_id)
         upload_to_drive(docx_path, session_id)
