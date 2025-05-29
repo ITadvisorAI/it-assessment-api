@@ -1,15 +1,13 @@
-
 import os
 import json
-import time
 import traceback
-import pandas as pd
-import requests
-from openpyxl import load_workbook
+from docx import Document
+from pptx import Presentation
+from pptx.util import Inches, Pt
+from pptx.enum.shapes import MSO_SHAPE
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
-from market_lookup import lookup_latest_market_device
 
 # === Google Drive Setup ===
 drive_service = None
@@ -17,184 +15,158 @@ try:
     creds_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
     if not creds_json:
         raise ValueError("Missing GOOGLE_SERVICE_ACCOUNT_JSON environment variable")
+
     creds = service_account.Credentials.from_service_account_info(
         json.loads(creds_json),
         scopes=["https://www.googleapis.com/auth/drive"]
     )
     drive_service = build("drive", "v3", credentials=creds)
-    print("✅ Google Drive initialized from ENV")
+    print("✅ Google Drive client initialized from ENV")
 except Exception as e:
     print(f"❌ Google Drive setup failed: {e}")
     traceback.print_exc()
 
+# === Utility: Create or locate session folder in Google Drive ===
 def get_or_create_drive_folder(folder_name):
     try:
         query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder'"
-        result = drive_service.files().list(q=query, fields="files(id)").execute()
-        folders = result.get("files", [])
+        results = drive_service.files().list(q=query, fields="files(id)").execute()
+        folders = results.get("files", [])
         if folders:
             return folders[0]["id"]
-        folder = drive_service.files().create(
-            body={"name": folder_name, "mimeType": "application/vnd.google-apps.folder"},
-            fields="id"
-        ).execute()
+
+        metadata = {
+            "name": folder_name,
+            "mimeType": "application/vnd.google-apps.folder"
+        }
+        folder = drive_service.files().create(body=metadata, fields="id").execute()
         return folder["id"]
     except Exception as e:
-        print(f"❌ Drive folder error: {e}")
+        print(f"❌ Failed to get/create folder: {e}")
         traceback.print_exc()
         return None
 
+# === Utility: Upload a file to Drive under the session folder ===
 def upload_to_drive(file_path, session_id):
     try:
         folder_id = get_or_create_drive_folder(session_id)
         if not folder_id:
             return None
-        file_meta = {"name": os.path.basename(file_path), "parents": [folder_id]}
+
+        metadata = {
+            "name": os.path.basename(file_path),
+            "parents": [folder_id]
+        }
         media = MediaFileUpload(file_path, resumable=True)
-        uploaded = drive_service.files().create(body=file_meta, media_body=media, fields="id").execute()
-        return f"https://drive.google.com/file/d/{uploaded['id']}/view"
+        uploaded = drive_service.files().create(
+            body=metadata,
+            media_body=media,
+            fields="id"
+        ).execute()
+
+        file_id = uploaded["id"]
+        return f"https://drive.google.com/file/d/{file_id}/view"
     except Exception as e:
         print(f"❌ Upload failed: {e}")
         traceback.print_exc()
         return None
 
-def wait_for_docx_service(url, timeout=60):
-    print("⏳ Waiting for DOCX service to warm up...")
-    start = time.time()
-    while time.time() - start < timeout:
-        try:
-            r = requests.head(url, timeout=5)
-            if r.status_code == 200:
-                print("✅ DOCX service is ready")
-                return True
-        except:
-            pass
-        time.sleep(3)
-    raise Exception("❌ DOCX service did not become ready")
-
-def call_generate_api(session_id, summary, recommendations, findings):
-    payload = {
-        "session_id": session_id,
-        "score_summary": summary,
-        "recommendations": recommendations,
-        "key_findings": findings
-    }
+# === Generate Word Report with Extended Pages ===
+def generate_docx(session_id, summary, recommendations, findings, output_path):
     try:
-        wait_for_docx_service("https://docx-generator-api.onrender.com/")
-        for attempt in range(3):
-            try:
-                print(f"➡️ Attempt {attempt+1}: Calling DOCX generator...")
-                r = requests.post("https://docx-generator-api.onrender.com/generate_assessment", json=payload, timeout=30)
-                r.raise_for_status()
-                return r.json()
-            except requests.exceptions.RequestException as e:
-                print(f"❌ Attempt {attempt+1} failed: {e}")
-                time.sleep(5 * (attempt + 1))
-        raise Exception("❌ All retries failed for DOCX generator API")
-    except Exception as e:
-        print(f"❌ DOCX/PPTX generation failed: {e}")
-        return {}
+        doc = Document()
+        doc.add_heading("IT Infrastructure Assessment Report", level=1)
+        doc.add_paragraph(f"Session ID: {session_id}")
 
-def process_assessment(session_id, email, files, webhook, session_folder):
-    try:
-        print(f"🚀 Processing assessment for session: {session_id}")
-        os.makedirs(session_folder, exist_ok=True)
-        downloaded = {}
-
-        for f in files:
-            if not f.get("file_url"):
-                print(f"⚠️ Missing file_url for: {f.get('file_name')}")
-                continue
-            path = os.path.join(session_folder, f["file_name"])
-            r = requests.get(f["file_url"], timeout=10)
-            with open(path, "wb") as fp:
-                fp.write(r.content)
-            downloaded[f["file_name"]] = path
-
-        tier_matrix = pd.read_excel("templates/ClassificationTier.xlsx", sheet_name="Sheet1")
-        tier_map = {str(row["Classification Tier"]).lower(): row["Score"] for _, row in tier_matrix.iterrows()}
-
-        summary_count = {"excellent": 0, "advanced": 0, "standard": 0, "obsolete": 0}
-
-        hw_template = "templates/HWGapAnalysis.xlsx"
-        hw_out = os.path.join(session_folder, f"HWGapAnalysis_{session_id}.xlsx")
-        if os.path.exists(hw_template):
-            wb = load_workbook(hw_template)
-            ws = wb["GAP_Working"] if "GAP_Working" in wb.sheetnames else wb.active
-            for row in ws.iter_rows(min_row=3):
-                model = str(row[3].value).lower() if row[3].value else ""
-                match = next((tier for tier in tier_map if tier in model), None)
-                if match:
-                    row[29].value = match
-                    summary_count[match] += 1
-                market_data = lookup_latest_market_device(model)
-                row[30].value = market_data.get("replacement")
-                row[31].value = market_data.get("release_year")
-                row[32].value = market_data.get("tier")
-            wb.save(hw_out)
-
-        sw_template = "templates/SWGapAnalysis.xlsx"
-        sw_out = os.path.join(session_folder, f"SWGapAnalysis_{session_id}.xlsx")
-        if os.path.exists(sw_template):
-            wb = load_workbook(sw_template)
-            ws = wb["GAP_Working"] if "GAP_Working" in wb.sheetnames else wb.active
-            for row in ws.iter_rows(min_row=3):
-                sw = str(row[3].value).lower() if row[3].value else ""
-                match = next((tier for tier in tier_map if tier in sw), None)
-                if match:
-                    row[22].value = match
-                    summary_count[match] += 1
-                market_data = lookup_latest_market_device(sw)
-                row[23].value = market_data.get("replacement")
-                row[24].value = market_data.get("release_year")
-                row[25].value = market_data.get("tier")
-            wb.save(sw_out)
-
-        total = sum(summary_count.values())
-        summary = ", ".join([f"{tier.capitalize()}: {int((count / total) * 100)}%" for tier, count in summary_count.items()])
-        recommendations = "Decommission obsolete assets. Upgrade standard-tier systems to advanced or excellent models."
-        findings = "Multiple legacy assets were found with no clear upgrade paths. Immediate attention is needed for Tier 1 and Tier 2 infrastructure."
-
-        doc_gen = call_generate_api(session_id, summary, recommendations, findings)
-
-        results = {
-            os.path.basename(hw_out): upload_to_drive(hw_out, session_id),
-            os.path.basename(sw_out): upload_to_drive(sw_out, session_id),
-            "IT_Current_Status_Assessment_Report.docx": doc_gen.get("docx_url"),
-            "IT_Current_Status_Executive_Report.pptx": doc_gen.get("pptx_url")
-        }
-
-        payload = {
-            "session_id": session_id,
-            "gpt_module": "it_assessment",
-            "status": "complete",
-            "message": "Assessment completed"
-        }
-        for i, (fname, furl) in enumerate(results.items(), start=1):
-            payload[f"file_{i}_name"] = fname
-            payload[f"file_{i}_url"] = furl
-        requests.post(webhook, json=payload)
-
-        files_for_gpt3 = [
-            {"file_name": os.path.basename(hw_out), "file_url": results[os.path.basename(hw_out)], "file_type": "gap_hw"},
-            {"file_name": os.path.basename(sw_out), "file_url": results[os.path.basename(sw_out)], "file_type": "gap_sw"},
-            {"file_name": "IT_Current_Status_Assessment_Report.docx", "file_url": results["IT_Current_Status_Assessment_Report.docx"], "file_type": "docx"},
-            {"file_name": "IT_Current_Status_Executive_Report.pptx", "file_url": results["IT_Current_Status_Executive_Report.pptx"], "file_type": "pptx"}
+        sections = [
+            ("Executive Summary", summary),
+            ("Infrastructure Overview", "Details on current infrastructure assets, layout, and topology."),
+            ("Score Summary", summary),
+            ("Key Findings", findings),
+            ("Recommendations", recommendations),
+            ("Security Gaps", "Analysis of identified security vulnerabilities and risks."),
+            ("Compliance Overview", "How current systems align with compliance standards."),
+            ("Technology Stack Gaps", "Mismatches or obsolescence in current technology stack."),
+            ("Cloud Readiness", "Assessment of current systems for migration to cloud environments."),
+            ("Future-State Architecture", "Suggestions for upgraded and modernized IT architecture."),
+            ("Cost-Saving Opportunities", "Identified areas where cost optimization is possible."),
+            ("Operational Risks", "Assessment of operational continuity and failover mechanisms."),
+            ("Vendor and Platform Evaluation", "Gaps in platform support and vendor lock-in risks."),
+            ("Asset Obsolescence Report", "Lists outdated or unsupported hardware/software."),
+            ("Conclusion", "Summary of transformation potential and next steps.")
         ]
 
-        r = requests.post("https://market-gap-analysis.onrender.com/start_market_gap", json={
-            "session_id": session_id,
-            "email": email,
-            "gpt_module": "gap_market",
-            "files": files_for_gpt3,
-            "next_action_webhook": webhook
-        })
-        r.raise_for_status()
-        print("✅ Successfully triggered market gap analysis")
+        for title, content in sections:
+            doc.add_heading(title, level=2)
+            doc.add_paragraph(content)
 
-        return True
+        doc.save(output_path)
+        print(f"📝 DOCX created: {output_path}")
+    except Exception as e:
+        print(f"❌ DOCX generation failed: {e}")
+        traceback.print_exc()
+
+# === Generate PPTX with Dynamic Content ===
+def generate_pptx(session_id, summary, recommendations, findings, output_path):
+    try:
+        ppt = Presentation()
+        layouts = ppt.slide_layouts
+
+        slides = [
+            ("IT Executive Summary", f"Session ID: {session_id}"),
+            ("Score Summary", summary),
+            ("Key Findings", findings),
+            ("Recommendations", recommendations),
+            ("Security Gaps", "Key security vulnerabilities identified."),
+            ("Compliance Risks", "Gaps in regulatory and compliance coverage."),
+            ("Cloud Readiness", "Suitability of systems for cloud adoption."),
+            ("Obsolete Systems", "List of legacy systems needing upgrade."),
+            ("Future-State Overview", "Target architecture and capabilities."),
+            ("Transformation Timeline", "Phase-wise breakdown (insert Gantt)"),
+            ("Budget Highlights", "High-level cost vs. benefit insights.")
+        ]
+
+        for title, content in slides:
+            slide = ppt.slides.add_slide(layouts[1])
+            slide.shapes.title.text = title
+            slide.placeholders[1].text = content
+
+        ppt.save(output_path)
+        print(f"📊 PPTX created: {output_path}")
+    except Exception as e:
+        print(f"❌ PPTX generation failed: {e}")
+        traceback.print_exc()
+
+# === Entry Point: Called via API ===
+def generate_assessment_report(data):
+    try:
+        session_id = data["session_id"]
+        summary = data["score_summary"]
+        recommendations = data["recommendations"]
+        findings = data.get("key_findings", "")
+
+        output_folder = os.path.join("temp_sessions", session_id)
+        os.makedirs(output_folder, exist_ok=True)
+
+        docx_path = os.path.join(output_folder, "IT_Current_Status_Assessment_Report.docx")
+        pptx_path = os.path.join(output_folder, "IT_Current_Status_Executive_Report.pptx")
+
+        generate_docx(session_id, summary, recommendations, findings, docx_path)
+        generate_pptx(session_id, summary, recommendations, findings, pptx_path)
+
+        docx_url = upload_to_drive(docx_path, session_id)
+        pptx_url = upload_to_drive(pptx_path, session_id)
+
+        return {
+            "docx_url": docx_url,
+            "pptx_url": pptx_url
+        }
 
     except Exception as e:
-        print(f"🔥 Unhandled error in process_assessment: {e}")
+        print(f"❌ Error in generate_assessment_report: {e}")
         traceback.print_exc()
-        return False
+        return {
+            "docx_url": None,
+            "pptx_url": None,
+            "error": str(e)
+        }
