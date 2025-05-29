@@ -8,7 +8,7 @@ from openpyxl import load_workbook
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
-from visualization import generate_hw_charts, generate_sw_charts  # ✅ NEW
+from visualization import generate_hw_charts, generate_sw_charts  # Chart module
 
 BASE_DIR = "temp_sessions"
 tier_matrix_path = "ClassificationTier.xlsx"
@@ -119,6 +119,9 @@ def process_assessment(session_id, files, email):
 
         hw_df = pd.read_excel(hw_file, header=1) if hw_file else pd.DataFrame()
         sw_df = pd.read_excel(sw_file, header=1) if sw_file else pd.DataFrame()
+
+        print("📥 HW Columns:", hw_df.columns.tolist())
+        print("📥 SW Columns:", sw_df.columns.tolist())
 
         tier_df = pd.read_excel(tier_matrix_path)
 
