@@ -3,96 +3,46 @@ import os
 import threading
 import logging
 import json
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify
 from generate_assessment import process_assessment
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
 
-# === Flask Initialization ===
 app = Flask(__name__)
 BASE_DIR = "temp_sessions"
-os.makedirs(BASE_DIR, exist_ok=True)
-
-# === Logging ===
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-# === Optional Google Drive Setup ===
-drive_service = None
-if os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON"):
-    try:
-        service_account_info = json.loads(os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON"))
-        creds = service_account.Credentials.from_service_account_info(
-            service_account_info,
-            scopes=["https://www.googleapis.com/auth/drive"]
-        )
-        drive_service = build('drive', 'v3', credentials=creds)
-        logging.info("✅ Google Drive service initialized")
-    except Exception as e:
-        logging.warning(f"⚠️ Failed to initialize Google Drive: {e}")
-else:
-    logging.info("🔕 Google Drive not configured")
+@app.route("/")
+def home():
+    return "✅ IT Assessment API is live"
 
-# === Health Check (GET and HEAD) ===
-@app.route("/", methods=["GET"])
-def health():
-    return "✅ IT Assessment API is live", 200
-
-@app.route("/", methods=["HEAD"])
-def health_head():
-    return "", 200
-
-# === POST /start_assessment ===
 @app.route("/start_assessment", methods=["POST"])
 def start_assessment():
     try:
-        data = request.get_json(force=True)
+        data = request.get_json()
         session_id = data.get("session_id")
         email = data.get("email")
-        goal = data.get("goal", "N/A")
         files = data.get("files", [])
         webhook = data.get("next_action_webhook")
 
-        logging.info(f"📥 Received session: {session_id}, email: {email}, files: {len(files)}, webhook: {webhook}")
+        if not session_id or not files or not email or not webhook:
+            return jsonify({"error": "Missing required parameters"}), 400
 
-        if not all([session_id, email, webhook, files]):
-            logging.error("❌ Missing required fields")
-            return jsonify({"error": "Missing required fields"}), 400
+        session_folder = os.path.join(BASE_DIR, session_id)
+        os.makedirs(session_folder, exist_ok=True)
+        logging.info(f"📁 Session folder created: {session_folder}")
 
-        folder = session_id if session_id.startswith("Temp_") else f"Temp_{session_id}"
-        folder_path = os.path.join(BASE_DIR, folder)
-        os.makedirs(folder_path, exist_ok=True)
-        logging.info(f"📁 Session folder created: {folder_path}")
-
-        # Start background thread with named identifier
-        thread = threading.Thread(
+        # Start background thread
+        threading.Thread(
             target=process_assessment,
-            args=(session_id, email, files, webhook, folder_path),
-            daemon=True,
-            name=f"assessment-{session_id}"
-        )
-        thread.start()
-        logging.info("🚀 Background assessment thread started")
+            args=(session_id, email, files, webhook, session_folder),
+            daemon=True
+        ).start()
+        logging.info(f"🚀 Background assessment thread started")
 
         return jsonify({"message": "Assessment started"}), 200
 
     except Exception as e:
-        logging.exception("🔥 Error in /start_assessment")
+        logging.error(f"🔥 Failed to start assessment: {e}")
         return jsonify({"error": str(e)}), 500
 
-# === Serve Output Files ===
-@app.route("/files/<path:filename>", methods=["GET"])
-def serve_file(filename):
-    try:
-        directory = os.path.join(BASE_DIR, os.path.dirname(filename))
-        file_only = os.path.basename(filename)
-        logging.info(f"📤 Serving file: {filename}")
-        return send_from_directory(directory, file_only)
-    except Exception as e:
-        logging.exception(f"❌ Error serving file: {filename}")
-        return jsonify({"error": str(e)}), 500
-
-# === Main Entry Point ===
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    logging.info(f"🚦 Starting IT Assessment API on port {port}...")
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
