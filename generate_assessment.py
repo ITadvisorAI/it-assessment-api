@@ -1,6 +1,6 @@
 import os
 import json
-import time
+import threading
 import traceback
 import pandas as pd
 import requests
@@ -25,7 +25,7 @@ except Exception as e:
     print(f"❌ Google Drive setup failed: {e}")
     traceback.print_exc()
 
-# === Google Drive Utility Functions ===
+# === Utility: Google Drive Upload ===
 def get_or_create_drive_folder(folder_name):
     try:
         query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder'"
@@ -57,9 +57,10 @@ def upload_to_drive(file_path, session_id):
         traceback.print_exc()
         return None
 
-# === DOCX/PPTX Generator Call ===
+# === DOCX/PPTX Generation Call ===
 def wait_for_docx_service(url, timeout=60):
     print("⏳ Waiting for DOCX service to warm up...")
+    import time
     start = time.time()
     while time.time() - start < timeout:
         try:
@@ -89,36 +90,33 @@ def call_generate_api(session_id, summary, recommendations, findings):
                 return r.json()
             except requests.exceptions.RequestException as e:
                 print(f"❌ Attempt {attempt+1} failed: {e}")
+                import time
                 time.sleep(5 * (attempt + 1))
         raise Exception("❌ All retries failed for DOCX generator API")
     except Exception as e:
         print(f"❌ DOCX/PPTX generation failed: {e}")
         return {}
 
-# === Process Assessment ===
-def process_assessment(session_id, email, files):
+# === Main Assessment Function ===
+def process_assessment(session_id, files, email, summary=None, recommendations=None):
     try:
-        print(f"🚀 Starting assessment for {session_id}")
+        print(f"🚀 Processing assessment for session: {session_id}")
 
-        # Step 1: Filter asset inventory files
-        inventory_files = [f for f in files if f.get("type") in ["hardware_inventory", "software_inventory"]]
-        if not inventory_files:
-            raise Exception("No inventory files provided")
+        # Dummy device classification summary for testing
+        summary_count = {"basic": 0, "standard": 0, "advanced": 0, "excellent": 0}
+        total = sum(summary_count.values())
+        if total == 0:
+            summary_text = "No device data available."
+        else:
+            summary_text = ", ".join([f"{tier.capitalize()}: {int((count / total) * 100)}%" for tier, count in summary_count.items()])
 
-        # Placeholder: perform infrastructure analysis
-        summary_count = {"basic": 5, "standard": 3, "advanced": 1, "excellent": 1}
-        total = sum(summary_count.values()) or 1  # Prevent ZeroDivisionError
-        summary = ", ".join([f"{tier.capitalize()}: {int((count / total) * 100)}%" for tier, count in summary_count.items()])
-        findings = "Obsolete systems, legacy platforms, and performance bottlenecks identified."
-        recommendations = "Migrate to hybrid infrastructure, replace legacy systems, enhance monitoring."
+        recommendations = recommendations or "Upgrade legacy systems. Modernize software stack. Enhance security."
+        findings = "Many devices are outdated and no longer supported. Gaps exist in scalability, cost, and performance."
 
-        # Step 2: Generate documents
-        result = call_generate_api(session_id, summary, recommendations, findings)
-
-        print("✅ Assessment completed")
-        return result
+        # Call DOCX/PPTX generator
+        result = call_generate_api(session_id, summary_text, recommendations, findings)
+        print("✅ Document generation result:", result)
 
     except Exception as e:
-        print(f"❌ Error in process_assessment: {e}")
+        print(f"🔥 Unhandled error in process_assessment: {e}")
         traceback.print_exc()
-        return {"error": str(e)}
