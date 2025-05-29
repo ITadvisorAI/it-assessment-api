@@ -19,8 +19,9 @@ def start_assessment():
         files = data.get("files", [])
         email = data.get("email", "")
 
-        logging.info(f"\U0001F4C1 Session folder created: {os.path.join(BASE_DIR, session_id)}")
-        logging.info("\U0001F680 Background assessment thread started")
+        os.makedirs(os.path.join(BASE_DIR, session_id), exist_ok=True)
+        logging.info(f"📁 Session folder created: {os.path.join(BASE_DIR, session_id)}")
+        logging.info("🚀 Background assessment thread started")
 
         thread = threading.Thread(target=process_assessment, args=(session_id, files, email))
         thread.start()
