@@ -20,3 +20,4 @@ six==1.17.0
 cachetools==5.3.3
 uritemplate==4.1.1
 python-dateutil==2.9.0.post0
+seaborn==0.13.2
