@@ -8,6 +8,7 @@ from openpyxl import load_workbook
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
+from visualization import generate_hw_charts, generate_sw_charts  # ✅ NEW
 
 BASE_DIR = "temp_sessions"
 tier_matrix_path = "ClassificationTier.xlsx"
@@ -116,8 +117,8 @@ def process_assessment(session_id, files, email):
         hw_file = next((f["path"] for f in files if "hardware" in f["type"]), None)
         sw_file = next((f["path"] for f in files if "software" in f["type"]), None)
 
-        hw_df = pd.read_excel(hw_file) if hw_file else pd.DataFrame()
-        sw_df = pd.read_excel(sw_file) if sw_file else pd.DataFrame()
+        hw_df = pd.read_excel(hw_file, header=1) if hw_file else pd.DataFrame()
+        sw_df = pd.read_excel(sw_file, header=1) if sw_file else pd.DataFrame()
 
         tier_df = pd.read_excel(tier_matrix_path)
 
@@ -129,9 +130,18 @@ def process_assessment(session_id, files, email):
         hw_df.to_excel(hw_gap_path, index=False)
         sw_df.to_excel(sw_gap_path, index=False)
 
-        hw_tier_summary = hw_df['Tier'].value_counts().to_dict()
-        total_hw = sum(hw_tier_summary.values())
-        summary = ", ".join([f"{k}: {int(v/total_hw*100)}%" for k, v in hw_tier_summary.items()]) if total_hw > 0 else "No hardware data available"
+        # ✅ Generate charts
+        hw_charts = generate_hw_charts(hw_gap_path, session_id)
+        sw_charts = generate_sw_charts(sw_gap_path, session_id)
+        print("📊 Charts generated:", hw_charts + sw_charts)
+
+        # ✅ Summary logic with safety
+        if 'Tier' in hw_df.columns and hw_df['Tier'].notnull().any():
+            hw_tier_summary = hw_df['Tier'].value_counts().to_dict()
+            total_hw = sum(hw_tier_summary.values())
+            summary = ", ".join([f"{k}: {int(v/total_hw*100)}%" for k, v in hw_tier_summary.items()]) if total_hw > 0 else "No hardware data available"
+        else:
+            summary = "Tier column missing or empty in HW data."
 
         recommendations = "Upgrade all devices marked as Tier 4 or 'Unknown'. Consider phasing out legacy systems."
         findings = f"{len(hw_df)} hardware entries and {len(sw_df)} software entries processed and classified."
