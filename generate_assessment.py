@@ -1,14 +1,15 @@
 
 import os
 import json
+import time
 import traceback
 import pandas as pd
 import requests
-import time
 from openpyxl import load_workbook
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
+from market_lookup import lookup_latest_market_device
 
 # === Google Drive Setup ===
 drive_service = None
@@ -26,7 +27,6 @@ except Exception as e:
     print(f"❌ Google Drive setup failed: {e}")
     traceback.print_exc()
 
-# === Utility: Google Drive Upload ===
 def get_or_create_drive_folder(folder_name):
     try:
         query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder'"
@@ -99,8 +99,8 @@ def process_assessment(session_id, email, files, webhook, session_folder):
     try:
         print(f"🚀 Processing assessment for session: {session_id}")
         os.makedirs(session_folder, exist_ok=True)
-
         downloaded = {}
+
         for f in files:
             if not f.get("file_url"):
                 print(f"⚠️ Missing file_url for: {f.get('file_name')}")
@@ -111,13 +111,11 @@ def process_assessment(session_id, email, files, webhook, session_folder):
                 fp.write(r.content)
             downloaded[f["file_name"]] = path
 
-        tier_matrix = pd.read_excel("ClassificationTier.xlsx", sheet_name="Sheet1")
+        tier_matrix = pd.read_excel("templates/ClassificationTier.xlsx", sheet_name="Sheet1")
         tier_map = {str(row["Classification Tier"]).lower(): row["Score"] for _, row in tier_matrix.iterrows()}
 
-        # Tier counters
-        tier_counts = {"excellent": 0, "advanced": 0, "standard": 0, "obsolete": 0}
+        summary_count = {"excellent": 0, "advanced": 0, "standard": 0, "obsolete": 0}
 
-        # Process HW
         hw_template = "templates/HWGapAnalysis.xlsx"
         hw_out = os.path.join(session_folder, f"HWGapAnalysis_{session_id}.xlsx")
         if os.path.exists(hw_template):
@@ -126,12 +124,15 @@ def process_assessment(session_id, email, files, webhook, session_folder):
             for row in ws.iter_rows(min_row=3):
                 model = str(row[3].value).lower() if row[3].value else ""
                 match = next((tier for tier in tier_map if tier in model), None)
-                if match in tier_counts:
-                    tier_counts[match] += 1
-                row[29].value = match
+                if match:
+                    row[29].value = match
+                    summary_count[match] += 1
+                market_data = lookup_latest_market_device(model)
+                row[30].value = market_data.get("replacement")
+                row[31].value = market_data.get("release_year")
+                row[32].value = market_data.get("tier")
             wb.save(hw_out)
 
-        # Process SW
         sw_template = "templates/SWGapAnalysis.xlsx"
         sw_out = os.path.join(session_folder, f"SWGapAnalysis_{session_id}.xlsx")
         if os.path.exists(sw_template):
@@ -140,15 +141,19 @@ def process_assessment(session_id, email, files, webhook, session_folder):
             for row in ws.iter_rows(min_row=3):
                 sw = str(row[3].value).lower() if row[3].value else ""
                 match = next((tier for tier in tier_map if tier in sw), None)
-                if match in tier_counts:
-                    tier_counts[match] += 1
-                row[22].value = match
+                if match:
+                    row[22].value = match
+                    summary_count[match] += 1
+                market_data = lookup_latest_market_device(sw)
+                row[23].value = market_data.get("replacement")
+                row[24].value = market_data.get("release_year")
+                row[25].value = market_data.get("tier")
             wb.save(sw_out)
 
-        total = sum(tier_counts.values()) or 1
-        summary = ", ".join([f"{tier.capitalize()}: {round(100 * count / total)}%" for tier, count in tier_counts.items()])
-        recommendations = "Decommission Obsolete assets, upgrade Standard, and monitor Advanced systems."
-        findings = "Tier scores were calculated from HW and SW asset inventory."
+        total = sum(summary_count.values())
+        summary = ", ".join([f"{tier.capitalize()}: {int((count / total) * 100)}%" for tier, count in summary_count.items()])
+        recommendations = "Decommission obsolete assets. Upgrade standard-tier systems to advanced or excellent models."
+        findings = "Multiple legacy assets were found with no clear upgrade paths. Immediate attention is needed for Tier 1 and Tier 2 infrastructure."
 
         doc_gen = call_generate_api(session_id, summary, recommendations, findings)
 
@@ -168,15 +173,8 @@ def process_assessment(session_id, email, files, webhook, session_folder):
         for i, (fname, furl) in enumerate(results.items(), start=1):
             payload[f"file_{i}_name"] = fname
             payload[f"file_{i}_url"] = furl
+        requests.post(webhook, json=payload)
 
-        try:
-            r = requests.post(webhook, json=payload)
-            r.raise_for_status()
-            print(f"✅ Webhook notified successfully: {r.status_code}")
-        except Exception as e:
-            print(f"❌ Failed to notify webhook: {e}")
-
-        # Trigger next GPT
         files_for_gpt3 = [
             {"file_name": os.path.basename(hw_out), "file_url": results[os.path.basename(hw_out)], "file_type": "gap_hw"},
             {"file_name": os.path.basename(sw_out), "file_url": results[os.path.basename(sw_out)], "file_type": "gap_sw"},
@@ -184,18 +182,15 @@ def process_assessment(session_id, email, files, webhook, session_folder):
             {"file_name": "IT_Current_Status_Executive_Report.pptx", "file_url": results["IT_Current_Status_Executive_Report.pptx"], "file_type": "pptx"}
         ]
 
-        try:
-            r = requests.post("https://market-gap-analysis.onrender.com/start_market_gap", json={
-                "session_id": session_id,
-                "email": email,
-                "gpt_module": "gap_market",
-                "files": files_for_gpt3,
-                "next_action_webhook": webhook
-            })
-            r.raise_for_status()
-            print(f"✅ Market GAP GPT triggered: {r.status_code}")
-        except Exception as e:
-            print(f"❌ Failed to trigger Market GAP GPT: {e}")
+        r = requests.post("https://market-gap-analysis.onrender.com/start_market_gap", json={
+            "session_id": session_id,
+            "email": email,
+            "gpt_module": "gap_market",
+            "files": files_for_gpt3,
+            "next_action_webhook": webhook
+        })
+        r.raise_for_status()
+        print("✅ Successfully triggered market gap analysis")
 
         return True
 
