@@ -15,18 +15,25 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 def start_assessment():
     try:
         data = request.get_json()
-        session_id = data["session_id"]
+        logging.info(f"📩 Received JSON data: {json.dumps(data, indent=2)}")
+
+        session_id = data.get("session_id")
+        if not session_id:
+            raise ValueError("Missing 'session_id' in request payload")
+
         files = data.get("files", [])
         email = data.get("email", "")
 
-        os.makedirs(os.path.join(BASE_DIR, session_id), exist_ok=True)
-        logging.info(f"📁 Session folder created: {os.path.join(BASE_DIR, session_id)}")
-        logging.info("🚀 Background assessment thread started")
+        folder_path = os.path.join(BASE_DIR, session_id)
+        os.makedirs(folder_path, exist_ok=True)
+        logging.info(f"📁 Session folder created: {folder_path}")
+        logging.info("🚀 Launching background thread for process_assessment...")
 
         thread = threading.Thread(target=process_assessment, args=(session_id, files, email))
         thread.start()
 
         return jsonify({"status": "started"}), 200
+
     except Exception as e:
         logging.exception("❌ Failed to start assessment")
         return jsonify({"error": str(e)}), 500
