@@ -55,7 +55,15 @@ def plot_device_type_by_tier(df, session_id):
     return None
 
 def generate_hw_charts(hw_path, session_id):
-    df = pd.read_excel(hw_path, header=1)
+    try:
+        df = pd.read_excel(hw_path, header=0)
+        if df.empty:
+            print(f"⚠️ No data in {hw_path}, skipping HW charts")
+            return []
+    except Exception as e:
+        print(f"❌ Failed to read HW file: {e}")
+        return []
+
     charts = []
     charts.append(plot_tier_distribution(df, "HW", session_id))
     charts.append(plot_environment_distribution(df, "HW", session_id))
@@ -63,7 +71,15 @@ def generate_hw_charts(hw_path, session_id):
     return [c for c in charts if c]
 
 def generate_sw_charts(sw_path, session_id):
-    df = pd.read_excel(sw_path, header=1)
+    try:
+        df = pd.read_excel(sw_path, header=0)
+        if df.empty:
+            print(f"⚠️ No data in {sw_path}, skipping SW charts")
+            return []
+    except Exception as e:
+        print(f"❌ Failed to read SW file: {e}")
+        return []
+
     charts = []
     charts.append(plot_tier_distribution(df, "SW", session_id))
     charts.append(plot_environment_distribution(df, "SW", session_id))
