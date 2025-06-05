@@ -1,54 +1,21 @@
-import traceback
+import requests
+import random
 
-# Simulated market response fallback
-DEFAULT_RESULT = {
-    "replacement": "No current match found",
-    "release_year": None,
-    "tier": "Standard"
-}
-
-# Mocked online market lookup function
-def lookup_latest_market_device(model_name):
+def fetch_market_device_data(device_name):
     """
-    Simulates querying the internet or API to get latest device replacements.
-    Replace this logic with actual API calls to vendors or marketplaces if needed.
+    Simulates market data lookup for a given device.
+    Replace this stub with real API calls or database queries as needed.
     """
-    try:
-        if not model_name:
-            return DEFAULT_RESULT
+    sample_vendors = ['Dell', 'HPE', 'Lenovo', 'Cisco', 'Supermicro']
+    sample_models = ['PowerEdge R750', 'ProLiant DL380', 'ThinkSystem SR650', 'UCS C240', 'SYS-620U']
+    sample_prices = [4500, 5200, 6100, 4900, 5600]
 
-        model_name = model_name.lower()
+    data = {
+        'Recommended Model': random.choice(sample_models),
+        'Vendor': random.choice(sample_vendors),
+        'Estimated Price (USD)': random.choice(sample_prices),
+        'Availability': 'In Stock',
+        'Lead Time (days)': random.randint(5, 14)
+    }
 
-        simulated_market_data = {
-            "dell poweredge r730": {
-                "replacement": "Dell PowerEdge R760",
-                "release_year": 2023,
-                "tier": "Excellent"
-            },
-            "hpe proliant dl380 gen9": {
-                "replacement": "HPE DL380 Gen11",
-                "release_year": 2024,
-                "tier": "Advanced"
-            },
-            "cisco ucs c240 m4": {
-                "replacement": "Cisco UCS C245 M6",
-                "release_year": 2023,
-                "tier": "Excellent"
-            },
-            "lenovo thinksystem sr650": {
-                "replacement": "Lenovo ThinkSystem SR670 V3",
-                "release_year": 2024,
-                "tier": "Excellent"
-            }
-        }
-
-        for key, value in simulated_market_data.items():
-            if key in model_name:
-                return value
-
-        return DEFAULT_RESULT
-
-    except Exception as e:
-        print(f"❌ Market lookup failed for '{model_name}': {e}")
-        traceback.print_exc()
-        return DEFAULT_RESULT
+    return data
