@@ -10,15 +10,14 @@ from report_docx import generate_docx_report
 from report_pptx import generate_pptx_report
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
-
+TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
 
 def process_assessment(session_id, email, files, next_action_webhook):
     try:
         session_path = os.path.join(BASE_DIR, "temp_sessions", session_id)
         os.makedirs(session_path, exist_ok=True)
 
-        print(f"\n🚀 Processing assessment for session: {session_id}")
+        print(f"🚀 Processing assessment for session: {session_id}")
 
         # Save incoming files
         asset_files = []
@@ -34,26 +33,26 @@ def process_assessment(session_id, email, files, next_action_webhook):
             else:
                 print(f"❌ Failed to download: {f['file_name']}")
 
-        # Load required templates
-        hw_gap_path = os.path.join(TEMPLATES_DIR, "HWGapAnalysis.xlsx")
-        sw_gap_path = os.path.join(TEMPLATES_DIR, "SWGapAnalysis.xlsx")
+        # Load templates
+        hw_gap_path = os.path.join(TEMPLATE_DIR, "HWGapAnalysis.xlsx")
+        sw_gap_path = os.path.join(TEMPLATE_DIR, "SWGapAnalysis.xlsx")
+
+        if not os.path.exists(hw_gap_path):
+            print(f"❌ HW template missing: {hw_gap_path}")
+        if not os.path.exists(sw_gap_path):
+            print(f"❌ SW template missing: {sw_gap_path}")
 
         # Generate charts
-        try:
-            hw_charts = generate_hw_charts(hw_gap_path, session_id)
-        except Exception as e:
-            print(f"❌ Failed to read HW file: {e}")
-            hw_charts = []
+        hw_charts = generate_hw_charts(hw_gap_path, session_id)
+        sw_charts = generate_sw_charts(sw_gap_path, session_id)
 
-        try:
-            sw_charts = generate_sw_charts(sw_gap_path, session_id)
-        except Exception as e:
-            print(f"❌ Failed to read SW file: {e}")
-            sw_charts = []
-
-        # Generate reports
-        docx_report = generate_docx_report(session_id)
-        pptx_report = generate_pptx_report(session_id)
+        # Generate DOCX and PPTX reports
+        docx_report = generate_docx_report(
+            hw_gap_path, sw_gap_path, hw_charts, sw_charts, session_id
+        )
+        pptx_report = generate_pptx_report(
+            hw_gap_path, sw_gap_path, hw_charts, sw_charts, session_id
+        )
 
         print(f"📄 Generated reports: {docx_report}, {pptx_report}")
 
