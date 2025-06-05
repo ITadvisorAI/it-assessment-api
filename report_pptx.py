@@ -3,7 +3,7 @@ from pptx.util import Inches, Pt
 from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
 import os
 
-def generate_pptx_report(session_id):
+def generate_pptx_report(hw_gap_path, sw_gap_path, hw_charts, sw_charts, session_id):
     prs = Presentation()
     chart_dir = os.path.join("temp_sessions", session_id, "charts")
 
