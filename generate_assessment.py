@@ -41,8 +41,13 @@ def process_assessment(session_id, email, files, next_action_webhook):
         sw_charts = generate_sw_charts(sw_gap_path, session_id)
 
         # Generate DOCX and PPTX reports
+        print("📄 Generating DOCX report...")
         docx_report = generate_docx_report(hw_gap_path, sw_gap_path, hw_charts, sw_charts, session_id)
+        print(f"✅ DOCX report saved at: {docx_report}")
+
+        print("📊 Generating PPTX report...")
         pptx_report = generate_pptx_report(hw_gap_path, sw_gap_path, hw_charts, sw_charts, session_id)
+        print(f"✅ PPTX report saved at: {pptx_report}")
 
         print(f"📄 Generated reports: {docx_report}, {pptx_report}")
 
