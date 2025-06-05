@@ -1,41 +1,40 @@
+
+import os
 from flask import Flask, request, jsonify
-import threading
-import logging
 from generate_assessment import process_assessment
 
 app = Flask(__name__)
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    handlers=[logging.StreamHandler()]
-)
-
 @app.route("/", methods=["GET"])
 def index():
-    return "✅ IT Assessment API is live"
+    return "✅ IT Assessment API is running"
 
 @app.route("/start_assessment", methods=["POST"])
 def start_assessment():
-    data = request.get_json()
-    session_id = data.get("session_id")
-    email = data.get("email")
-    goal = data.get("goal")
-    files = data.get("files", [])
-    next_action_webhook = data.get("next_action_webhook")
+    try:
+        data = request.get_json()
+        session_id = data.get("session_id")
+        email = data.get("email")
+        files = data.get("files", [])
+        next_action_webhook = data.get("next_action_webhook")
 
-    logging.info("📩 Received POST payload:\n%s", data)
-    logging.info("📁 Session folder created at: temp_sessions/%s", session_id)
-    logging.info("📧 Email: %s | 📂 Files: %d", email, len(files))
-    logging.info("🚀 Starting background thread for assessment")
+        if not session_id or not email or not files or not next_action_webhook:
+            return jsonify({"error": "Missing required fields"}), 400
 
-    thread = threading.Thread(
-        target=process_assessment,
-        args=(session_id, email, files, next_action_webhook)
-    )
-    thread.start()
+        print(f"📩 Received POST payload:\n{data}")
+        print(f"📁 Session folder created at: temp_sessions/{session_id}")
+        print(f"📧 Email: {email} | 📂 Files: {len(files)}")
+        print("🚀 Starting background thread for assessment")
 
-    return jsonify({"status": "processing started"}), 200
+        from threading import Thread
+        t = Thread(target=process_assessment, args=(session_id, email, files, next_action_webhook))
+        t.start()
+
+        return jsonify({"status": "processing"}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(debug=True, host="0.0.0.0", port=port)
