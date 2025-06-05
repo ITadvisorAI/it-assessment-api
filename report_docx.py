@@ -1,46 +1,38 @@
+import os
 from docx import Document
 from docx.shared import Inches
-import os
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-def generate_docx_report(hw_gap_path, sw_gap_path, hw_charts, sw_charts, session_id):
-    doc = Document()
+def generate_docx_report(hw_path, sw_path, hw_charts, sw_charts, session_id):
+    # Load the template
+    template_path = os.path.join("templates", "IT_Current_Status_Assessment_Report_Template.docx")
+    document = Document(template_path)
 
-    chart_dir = os.path.join("temp_sessions", session_id, "charts")
-    doc.add_heading("IT Infrastructure Current Status Report", 0)
-    doc.add_paragraph(f"Session ID: {session_id}")
-    doc.add_paragraph("This report contains hardware and software gap analysis along with visual insights.")
+    # Add session heading
+    document.add_heading(f"Assessment Report – Session ID: {session_id}", level=1)
 
-    # Hardware Section
-    doc.add_heading("Hardware Analysis", level=1)
-    hw_charts = [
-        "hw_tier_distribution.png",
-        "hw_environment_distribution.png",
-        "hw_device_type_vs_tier.png"
-    ]
+    # Add Hardware GAP Analysis section
+    document.add_heading("Hardware GAP Analysis", level=2)
+    document.add_paragraph("This section includes the results of the hardware gap analysis...")
+
     for chart in hw_charts:
-        path = os.path.join(chart_dir, chart)
-        title = chart.replace("_", " ").replace(".png", "").title()
-        if os.path.exists(path):
-            doc.add_heading(title, level=2)
-            doc.add_picture(path, width=Inches(5.5))
-        else:
-            doc.add_paragraph(f"⚠️ Missing chart: {chart}")
+        document.add_picture(chart, width=Inches(5.5))
+        last_paragraph = document.paragraphs[-1]
+        last_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-    # Software Section
-    doc.add_heading("Software Analysis", level=1)
-    sw_charts = [
-        "sw_tier_distribution.png",
-        "sw_environment_distribution.png"
-    ]
+    # Add Software GAP Analysis section
+    document.add_heading("Software GAP Analysis", level=2)
+    document.add_paragraph("This section includes the results of the software gap analysis...")
+
     for chart in sw_charts:
-        path = os.path.join(chart_dir, chart)
-        title = chart.replace("_", " ").replace(".png", "").title()
-        if os.path.exists(path):
-            doc.add_heading(title, level=2)
-            doc.add_picture(path, width=Inches(5.5))
-        else:
-            doc.add_paragraph(f"⚠️ Missing chart: {chart}")
+        document.add_picture(chart, width=Inches(5.5))
+        last_paragraph = document.paragraphs[-1]
+        last_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-    output_path = os.path.join("temp_sessions", session_id, f"IT_Infrastructure_Current_Status_Report_{session_id}.docx")
-    doc.save(output_path)
+    # Save the final document
+    output_dir = os.path.join("temp_sessions", session_id)
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, f"IT_Infrastructure_Current_Status_Report_{session_id}.docx")
+    document.save(output_path)
+
     return output_path
