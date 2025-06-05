@@ -2,7 +2,7 @@ from docx import Document
 from docx.shared import Inches
 import os
 
-def generate_docx_report(session_id):
+def generate_docx_report(hw_gap_path, sw_gap_path, hw_charts, sw_charts, session_id):
     doc = Document()
 
     chart_dir = os.path.join("temp_sessions", session_id, "charts")
