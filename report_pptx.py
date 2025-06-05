@@ -1,42 +1,40 @@
-from pptx import Presentation
-from pptx.util import Inches, Pt
-from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
+
 import os
+from pptx import Presentation
+from pptx.util import Inches
+from pptx.enum.shapes import MSO_SHAPE
+from pptx.dml.color import RGBColor
 
-def generate_pptx_report(hw_gap_path, sw_gap_path, hw_charts, sw_charts, session_id):
-    prs = Presentation()
-    chart_dir = os.path.join("temp_sessions", session_id, "charts")
+def generate_pptx_report(hw_path, sw_path, hw_charts, sw_charts, session_id):
+    # Load the PPTX template
+    template_path = os.path.join("templates", "IT_Current_Status_Executive_Report_Template.pptx")
+    prs = Presentation(template_path)
 
-    # Title slide
-    slide = prs.slides.add_slide(prs.slide_layouts[0])
-    slide.shapes.title.text = "IT Infrastructure Executive Summary"
-    slide.placeholders[1].text = f"Session ID: {session_id}"
+    # Define output path
+    output_dir = os.path.join("temp_sessions", session_id)
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, f"IT_Infrastructure_Executive_Report_{session_id}.pptx")
 
-    chart_titles = {
-        "hw_tier_distribution.png": "Hardware Tier Distribution",
-        "hw_environment_distribution.png": "Hardware Environment Distribution",
-        "hw_device_type_vs_tier.png": "Device Type vs Tier Level",
-        "sw_tier_distribution.png": "Software Tier Distribution",
-        "sw_environment_distribution.png": "Software Environment Distribution"
-    }
+    # Add Hardware GAP Charts
+    for chart_path in hw_charts:
+        slide = prs.slides.add_slide(prs.slide_layouts[5])
+        title = slide.shapes.title
+        title.text = "Hardware GAP Analysis Chart"
+        left = Inches(1)
+        top = Inches(1.5)
+        height = Inches(4.5)
+        slide.shapes.add_picture(chart_path, left, top, height=height)
 
-    for chart_file, title in chart_titles.items():
-        slide = prs.slides.add_slide(prs.slide_layouts[5])  # Blank slide
-        shapes = slide.shapes
+    # Add Software GAP Charts
+    for chart_path in sw_charts:
+        slide = prs.slides.add_slide(prs.slide_layouts[5])
+        title = slide.shapes.title
+        title.text = "Software GAP Analysis Chart"
+        left = Inches(1)
+        top = Inches(1.5)
+        height = Inches(4.5)
+        slide.shapes.add_picture(chart_path, left, top, height=height)
 
-        # Always show title
-        left, top, width, height = Inches(1), Inches(0.3), Inches(8), Inches(0.5)
-        title_shape = shapes.add_shape(MSO_AUTO_SHAPE_TYPE.RECTANGLE, left, top, width, height)
-        title_shape.text = title
-
-        # Try to insert chart or fallback message
-        chart_path = os.path.join(chart_dir, chart_file)
-        if os.path.exists(chart_path):
-            shapes.add_picture(chart_path, Inches(1), Inches(1.2), width=Inches(7.5))
-        else:
-            textbox = shapes.add_textbox(Inches(1), Inches(1.5), Inches(7), Inches(1))
-            textbox.text_frame.text = f"⚠️ Chart not found: {chart_file}"
-
-    output_path = os.path.join("temp_sessions", session_id, f"IT_Infrastructure_Executive_Report_{session_id}.pptx")
+    # Save PPTX
     prs.save(output_path)
     return output_path
