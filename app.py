@@ -4,37 +4,26 @@ from generate_assessment import generate_assessment
 
 app = Flask(__name__)
 
-@app.route("/", methods=["GET"])
+@app.route("/")
 def index():
-    return "IT Assessment API Running", 200
+    return "IT Assessment API is live", 200
 
 @app.route("/start_assessment", methods=["POST"])
 def start_assessment():
     try:
-        payload = request.get_json(force=True)
-        session_id = payload.get("session_id")
-        email = payload.get("email")
-        goal = payload.get("goal")
-        files = payload.get("files", [])
+        data = request.get_json(force=True)
+        session_id = data.get("session_id")
+        email = data.get("email")
+        goal = data.get("goal")
+        files = data.get("files", [])
+        next_action_webhook = data.get("next_action_webhook", "")
 
-        # Convert Google Drive links into local file paths (assuming pre-downloaded)
-        for f in files:
-            f["local_path"] = os.path.join("temp_sessions", session_id, f["file_name"])
+        if not session_id or not email or not goal:
+            return jsonify({"error": "Missing required fields"}), 400
 
-        print(f"▶️ Starting assessment for {session_id} - {email}")
-        result = generate_assessment(session_id, files, goal)
-
-        if result["status"] == "completed":
-            return jsonify({
-                "status": "completed",
-                "session_id": session_id,
-                "docx": result["docx"],
-                "pptx": result["pptx"],
-                "hw_gap": result["hw_gap"],
-                "sw_gap": result["sw_gap"]
-            }), 200
-        else:
-            return jsonify({"status": "failed", "error": result.get("error")}), 500
+        print(f"[INFO] Starting assessment for session: {session_id}")
+        generate_assessment(session_id, email, goal, files, next_action_webhook)
+        return jsonify({"status": "Assessment started"}), 200
 
     except Exception as e:
         print("❌ Error in /start_assessment:", str(e))
