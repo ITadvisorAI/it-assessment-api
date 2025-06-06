@@ -1,44 +1,50 @@
+
 import os
 from pptx import Presentation
-from pptx.util import Inches
+from pptx.util import Inches, Pt
+from pptx.enum.shapes import MSO_SHAPE
+from pptx.dml.color import RGBColor
 
-def generate_pptx_report(hw_charts, sw_charts, session_id):
+def generate_pptx_report(session_id, hw_df, sw_df, chart_paths):
     try:
-        # Load the PPTX template
-        template_path = os.path.join("templates", "IT_Current_Status_Executive_Report_Template.pptx")
-        prs = Presentation(template_path)
-
-        # Define output path
         output_dir = os.path.join("temp_sessions", session_id)
         os.makedirs(output_dir, exist_ok=True)
-        output_path = os.path.join(output_dir, f"IT_Infrastructure_Executive_Report_{session_id}.pptx")
+        output_path = os.path.join(output_dir, "IT_Current_Status_Executive_Report.pptx")
 
-        # Add Hardware GAP Charts
-        for chart_path in hw_charts:
-            if os.path.isfile(chart_path):
-                slide = prs.slides.add_slide(prs.slide_layouts[5])
-                title = slide.shapes.title
-                title.text = "Hardware GAP Analysis Chart"
+        prs = Presentation()
+        title_slide_layout = prs.slide_layouts[0]
+        content_layout = prs.slide_layouts[1]
+        blank_layout = prs.slide_layouts[6]
+
+        # Title Slide
+        slide = prs.slides.add_slide(title_slide_layout)
+        slide.shapes.title.text = "IT Infrastructure Executive Summary"
+        slide.placeholders[1].text = f"Session ID: {session_id}"
+
+        # HW Summary
+        slide = prs.slides.add_slide(content_layout)
+        slide.shapes.title.text = "Hardware Summary"
+        hw_summary = f"Total HW Devices: {len(hw_df)}\nTier Distribution:\n{hw_df['Tier'].value_counts().to_string()}" if 'Tier' in hw_df.columns else "No tier data."
+        slide.placeholders[1].text = hw_summary
+
+        # SW Summary
+        slide = prs.slides.add_slide(content_layout)
+        slide.shapes.title.text = "Software Summary"
+        sw_summary = f"Total SW Packages: {len(sw_df)}\nTier Distribution:\n{sw_df['Tier'].value_counts().to_string()}" if 'Tier' in sw_df.columns else "No tier data."
+        slide.placeholders[1].text = sw_summary
+
+        # Charts
+        for path in chart_paths:
+            if os.path.exists(path):
+                slide = prs.slides.add_slide(blank_layout)
                 left = Inches(1)
-                top = Inches(1.5)
-                height = Inches(4.5)
-                slide.shapes.add_picture(chart_path, left, top, height=height)
+                top = Inches(1)
+                height = Inches(5)
+                slide.shapes.add_picture(path, left, top, height=height)
 
-        # Add Software GAP Charts
-        for chart_path in sw_charts:
-            if os.path.isfile(chart_path):
-                slide = prs.slides.add_slide(prs.slide_layouts[5])
-                title = slide.shapes.title
-                title.text = "Software GAP Analysis Chart"
-                left = Inches(1)
-                top = Inches(1.5)
-                height = Inches(4.5)
-                slide.shapes.add_picture(chart_path, left, top, height=height)
-
-        # Save the final presentation
         prs.save(output_path)
         return output_path
 
     except Exception as e:
-        print(f"❌ Error generating PPTX: {e}")
+        print("❌ Error generating PPTX:", str(e))
         return None
