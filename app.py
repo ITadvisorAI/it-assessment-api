@@ -22,7 +22,7 @@ def start_assessment():
             return jsonify({"error": "Missing required fields"}), 400
 
         print(f"[INFO] Starting assessment for session: {session_id}")
-        generate_assessment(session_id, email, goal, files, next_action_webhook)
+        generate_assessment(session_id, goal, files)
         return jsonify({"status": "Assessment started"}), 200
 
     except Exception as e:
