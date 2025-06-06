@@ -24,7 +24,7 @@ def start_assessment():
         if not session_id or not email or not goal or not files:
             return jsonify({"error": "Missing required fields"}), 400
 
-        generate_assessment(session_id, email, goal, files)
+        generate_assessment(session_id, files, goal)
 
         return jsonify({"message": "Assessment completed successfully"}), 200
 
