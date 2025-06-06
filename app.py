@@ -1,8 +1,15 @@
 from flask import Flask, request, jsonify
 import os
-from generate_assessment import generate_assessment
 
 app = Flask(__name__)
+
+# Safe import of generate_assessment
+try:
+    from generate_assessment import generate_assessment
+    assessment_available = True
+except Exception as e:
+    print("❌ ERROR IMPORTING generate_assessment:", e)
+    assessment_available = False
 
 @app.route("/")
 def index():
@@ -22,7 +29,12 @@ def start_assessment():
             return jsonify({"error": "Missing required fields"}), 400
 
         print(f"[INFO] Starting assessment for session: {session_id}")
+        
+        if not assessment_available:
+            return jsonify({"error": "Assessment engine not available. Failed to import module."}), 500
+        
         generate_assessment(session_id, goal, files)
+
         return jsonify({"status": "Assessment started"}), 200
 
     except Exception as e:
