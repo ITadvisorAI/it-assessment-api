@@ -10,11 +10,6 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-BASE_DIR = "temp_sessions"
-TIER_MATRIX_PATH = "ClassificationTier.xlsx"
-HW_TEMPLATE = "templates/HWGapAnalysis.xlsx"
-SW_TEMPLATE = "templates/SWGapAnalysis.xlsx"
-
 # === Google Drive Setup ===
 drive_service = None
 try:
@@ -31,7 +26,7 @@ except Exception as e:
     print(f"❌ Google Drive setup failed: {e}")
     traceback.print_exc()
 
-# === Drive Utilities ===
+# === Utility: Google Drive Upload ===
 def get_or_create_drive_folder(folder_name):
     try:
         query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder'"
@@ -63,7 +58,6 @@ def upload_to_drive(file_path, session_id):
         traceback.print_exc()
         return None
 
-# === DOCX/PPTX API Call ===
 def wait_for_docx_service(url, timeout=60):
     print("⏳ Waiting for DOCX service to warm up...")
     start = time.time()
@@ -101,7 +95,6 @@ def call_generate_api(session_id, summary, recommendations, findings):
         print(f"❌ DOCX/PPTX generation failed: {e}")
         return {}
 
-# === Main Assessment Processor ===
 def process_assessment(session_id, email, files, webhook, session_folder):
     try:
         print(f"🚀 Processing assessment for session: {session_id}")
@@ -110,6 +103,7 @@ def process_assessment(session_id, email, files, webhook, session_folder):
         downloaded = {}
         for f in files:
             if not f.get("file_url"):
+                print(f"⚠️ Missing file_url for: {f.get('file_name')}")
                 continue
             path = os.path.join(session_folder, f["file_name"])
             r = requests.get(f["file_url"], timeout=10)
@@ -117,33 +111,35 @@ def process_assessment(session_id, email, files, webhook, session_folder):
                 fp.write(r.content)
             downloaded[f["file_name"]] = path
 
-        tier_matrix = pd.read_excel(TIER_MATRIX_PATH, sheet_name="Sheet1")
-        tier_keywords = tier_matrix["Keyword"].str.lower().tolist()
-        tier_values = tier_matrix["Tier"].str.lower().tolist()
-        tier_map = dict(zip(tier_keywords, tier_values))
+        tier_matrix = pd.read_excel("ClassificationTier.xlsx", sheet_name="Sheet1")
+        tier_map = {str(row["Classification Tier"]).lower(): row["Score"] for _, row in tier_matrix.iterrows()}
+
+        # Tier counters
         tier_counts = {"excellent": 0, "advanced": 0, "standard": 0, "obsolete": 0}
 
         # Process HW
+        hw_template = "templates/HWGapAnalysis.xlsx"
         hw_out = os.path.join(session_folder, f"HWGapAnalysis_{session_id}.xlsx")
-        if os.path.exists(HW_TEMPLATE):
-            wb = load_workbook(HW_TEMPLATE)
+        if os.path.exists(hw_template):
+            wb = load_workbook(hw_template)
             ws = wb["GAP_Working"] if "GAP_Working" in wb.sheetnames else wb.active
             for row in ws.iter_rows(min_row=3):
                 model = str(row[3].value).lower() if row[3].value else ""
-                match = next((tier for keyword, tier in tier_map.items() if keyword in model), None)
+                match = next((tier for tier in tier_map if tier in model), None)
                 if match in tier_counts:
                     tier_counts[match] += 1
                 row[29].value = match
             wb.save(hw_out)
 
         # Process SW
+        sw_template = "templates/SWGapAnalysis.xlsx"
         sw_out = os.path.join(session_folder, f"SWGapAnalysis_{session_id}.xlsx")
-        if os.path.exists(SW_TEMPLATE):
-            wb = load_workbook(SW_TEMPLATE)
+        if os.path.exists(sw_template):
+            wb = load_workbook(sw_template)
             ws = wb["GAP_Working"] if "GAP_Working" in wb.sheetnames else wb.active
             for row in ws.iter_rows(min_row=3):
                 sw = str(row[3].value).lower() if row[3].value else ""
-                match = next((tier for keyword, tier in tier_map.items() if keyword in sw), None)
+                match = next((tier for tier in tier_map if tier in sw), None)
                 if match in tier_counts:
                     tier_counts[match] += 1
                 row[22].value = match
@@ -173,7 +169,12 @@ def process_assessment(session_id, email, files, webhook, session_folder):
             payload[f"file_{i}_name"] = fname
             payload[f"file_{i}_url"] = furl
 
-        requests.post(webhook, json=payload)
+        try:
+            r = requests.post(webhook, json=payload)
+            r.raise_for_status()
+            print(f"✅ Webhook notified successfully: {r.status_code}")
+        except Exception as e:
+            print(f"❌ Failed to notify webhook: {e}")
 
         # Trigger next GPT
         files_for_gpt3 = [
@@ -183,15 +184,19 @@ def process_assessment(session_id, email, files, webhook, session_folder):
             {"file_name": "IT_Current_Status_Executive_Report.pptx", "file_url": results["IT_Current_Status_Executive_Report.pptx"], "file_type": "pptx"}
         ]
 
-        requests.post("https://market-gap-analysis.onrender.com/start_market_gap", json={
-            "session_id": session_id,
-            "email": email,
-            "gpt_module": "gap_market",
-            "files": files_for_gpt3,
-            "next_action_webhook": webhook
-        })
+        try:
+            r = requests.post("https://market-gap-analysis.onrender.com/start_market_gap", json={
+                "session_id": session_id,
+                "email": email,
+                "gpt_module": "gap_market",
+                "files": files_for_gpt3,
+                "next_action_webhook": webhook
+            })
+            r.raise_for_status()
+            print(f"✅ Market GAP GPT triggered: {r.status_code}")
+        except Exception as e:
+            print(f"❌ Failed to trigger Market GAP GPT: {e}")
 
-        print("✅ Assessment process complete")
         return True
 
     except Exception as e:
