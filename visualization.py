@@ -1,35 +1,27 @@
-
 import os
-import pandas as pd
 import matplotlib.pyplot as plt
 
-def generate_charts(hw_df, sw_df, session_id):
-    chart_dir = os.path.join("temp_sessions", session_id, "charts")
-    os.makedirs(chart_dir, exist_ok=True)
-    chart_paths = []
+def generate_charts(hw_df, sw_df, session_folder):
+    os.makedirs(os.path.join(session_folder, "charts"), exist_ok=True)
 
-    def save_pie_chart(data, title, filename):
-        try:
-            plt.figure(figsize=(5, 5))
-            data.plot.pie(autopct='%1.1f%%', startangle=90)
-            plt.title(title)
-            plt.ylabel('')
-            path = os.path.join(chart_dir, filename)
-            plt.tight_layout()
-            plt.savefig(path)
-            plt.close()
-            chart_paths.append(path)
-        except Exception as e:
-            print(f"❌ Failed to generate chart {title}: {e}")
+    def pie_chart(data, column, title, filename):
+        counts = data[column].value_counts()
+        plt.figure(figsize=(5, 5))
+        plt.pie(counts, labels=counts.index, autopct='%1.1f%%', startangle=140)
+        plt.title(title)
+        chart_path = os.path.join(session_folder, "charts", filename)
+        plt.savefig(chart_path)
+        plt.close()
+        return chart_path
 
-    if 'Tier' in hw_df.columns:
-        save_pie_chart(hw_df['Tier'].value_counts(), "HW Tier Distribution", "hw_tier_distribution.png")
-    if 'Status' in hw_df.columns:
-        save_pie_chart(hw_df['Status'].value_counts(), "HW Status Breakdown", "hw_status_pie.png")
+    charts = {
+        "hw_tier_chart": pie_chart(hw_df, "Tier", "Hardware Tier Distribution", "hw_tier_chart.png"),
+        "hw_status_chart": pie_chart(hw_df, "Status", "Hardware Status", "hw_status_chart.png"),
+        "sw_tier_chart": pie_chart(sw_df, "Tier", "Software Tier Distribution", "sw_tier_chart.png"),
+        "sw_status_chart": pie_chart(sw_df, "Status", "Software Status", "sw_status_chart.png")
+    }
 
-    if 'Tier' in sw_df.columns:
-        save_pie_chart(sw_df['Tier'].value_counts(), "SW Tier Distribution", "sw_tier_distribution.png")
-    if 'Status' in sw_df.columns:
-        save_pie_chart(sw_df['Status'].value_counts(), "SW Status Breakdown", "sw_status_pie.png")
+    return charts
 
-    return chart_paths
+# Patch to match expected import name
+generate_visual_charts = generate_charts
