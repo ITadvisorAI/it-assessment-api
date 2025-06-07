@@ -73,3 +73,12 @@ def generate_assessment(session_id, email, files, output_folder_url):
         "docx_report": docx_path,
         "pptx_summary": pptx_path
     }
+
+# ✅ Minimal addition to support app.py
+def process_assessment(data):
+    return generate_assessment(
+        session_id=data.get("session_id"),
+        email=data.get("email"),
+        files=data.get("files"),
+        output_folder_url=data.get("output_folder_url", "")
+    )
