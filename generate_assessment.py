@@ -5,8 +5,8 @@ import json
 import logging
 from market_lookup import fetch_latest_device_replacement
 from visualization import generate_visual_charts
-from docx_generator import generate_docx_report
-from pptx_generator import generate_pptx_summary
+from report_docx import generate_docx_report
+from report_pptx import generate_pptx_report
 
 logging.basicConfig(level=logging.INFO)
 
