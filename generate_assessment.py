@@ -1,70 +1,75 @@
 import os
 import pandas as pd
 import requests
-from market_lookup import suggest_hw_replacements, suggest_sw_replacements
-from visualization import generate_charts
-from report_docx import generate_docx_report
-from report_pptx import generate_pptx_report
+import json
+import logging
+from market_lookup import fetch_latest_device_replacement
+from visualization import generate_visual_charts
+from docx_generator import generate_docx_report
+from pptx_generator import generate_pptx_summary
 
-def generate_assessment(session_id, email, goal, files, next_action_webhook):
-    session_path = os.path.join("temp_sessions", session_id)
-    os.makedirs(session_path, exist_ok=True)
+logging.basicConfig(level=logging.INFO)
 
-    hw_df = sw_df = None
-    hw_file_path = sw_file_path = ""
+TEMPLATE_DIR = "templates"
+OUTPUT_DIR = "output"
 
-    for file in files:
-        ftype = file['type'].lower()
-        file_url = file['file_url']
-        file_name = file['file_name']
-        local_path = os.path.join(session_path, file_name)
+def classify_device(device_name, tier_matrix):
+    device_name = device_name.lower()
+    for keyword, tier in tier_matrix.items():
+        if keyword in device_name:
+            return tier
+    return "Unknown"
 
-        # Simulate download (actual logic may involve URL fetching)
-        with open(local_path, "wb") as f:
-            f.write(open(file_url, "rb").read())
+def load_tier_matrix(filepath):
+    df = pd.read_excel(filepath)
+    tier_mapping = dict(zip(df['Keyword'].str.lower(), df['Tier']))
+    return tier_mapping
 
-        if "hardware" in ftype or "hw" in file_name.lower():
-            hw_file_path = local_path
-        elif "software" in ftype or "sw" in file_name.lower():
-            sw_file_path = local_path
+def process_excel_file(file_info, tier_matrix):
+    file_path = file_info["file_path"]
+    logging.info(f"📂 Processing Excel file: {file_path}")
+    df = pd.read_excel(file_path)
 
-    if hw_file_path:
-        hw_df = pd.read_excel(hw_file_path)
-        hw_df = suggest_hw_replacements(hw_df)
+    if 'Device Name' in df.columns:
+        df['Tier'] = df['Device Name'].apply(lambda name: classify_device(name, tier_matrix))
+        df['Recommended Replacement'] = df['Device Name'].apply(fetch_latest_device_replacement)
 
-    if sw_file_path:
-        sw_df = pd.read_excel(sw_file_path)
-        sw_df = suggest_sw_replacements(sw_df)
+    output_path = os.path.join(OUTPUT_DIR, f"classified_{os.path.basename(file_path)}")
+    df.to_excel(output_path, index=False)
+    logging.info(f"✅ Saved classified Excel to: {output_path}")
+    return output_path, df
 
-    chart_paths = generate_charts(session_id, hw_df, sw_df)
+def generate_assessment(session_id, email, files, output_folder_url):
+    logging.info("🚀 Starting infrastructure assessment generation...")
 
-    generate_docx_report(session_id, hw_df, sw_df, chart_paths)
-    generate_pptx_report(session_id, hw_df, sw_df, chart_paths)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    # Save Excel gap files
-    if hw_df is not None:
-        hw_df.to_excel(os.path.join(session_path, f"HWGapAnalysis_{session_id}.xlsx"), index=False)
-    if sw_df is not None:
-        sw_df.to_excel(os.path.join(session_path, f"SWGapAnalysis_{session_id}.xlsx"), index=False)
+    hw_gap_file = None
+    sw_gap_file = None
+    hw_data = None
+    sw_data = None
 
-    # Send to next GPT module
-    payload = {
+    tier_matrix_path = os.path.join(TEMPLATE_DIR, "ClassificationTier.xlsx")
+    tier_matrix = load_tier_matrix(tier_matrix_path)
+
+    for f in files:
+        if f["type"] == "asset_inventory" and "hardware" in f["file_name"].lower():
+            hw_gap_file, hw_data = process_excel_file(f, tier_matrix)
+        elif f["type"] == "asset_inventory" and "software" in f["file_name"].lower():
+            sw_gap_file, sw_data = process_excel_file(f, tier_matrix)
+
+    docx_path = generate_docx_report(session_id, email, hw_data, sw_data)
+    pptx_path = generate_pptx_summary(session_id, email, hw_data, sw_data)
+
+    charts = generate_visual_charts(hw_data, sw_data)
+    logging.info(f"📊 Charts generated: {charts}")
+
+    logging.info("🎉 Infrastructure assessment completed.")
+    return {
         "session_id": session_id,
-        "gpt_module": "it_assessment",
-        "status": "complete",
-        "message": "Assessment completed",
-        "file_1_name": f"HWGapAnalysis_{session_id}.xlsx",
-        "file_1_url": f"https://it-assessment-api.onrender.com/files/HWGapAnalysis_{session_id}.xlsx",
-        "file_2_name": f"SWGapAnalysis_{session_id}.xlsx",
-        "file_2_url": f"https://it-assessment-api.onrender.com/files/SWGapAnalysis_{session_id}.xlsx",
-        "file_3_name": "IT_Current_Status_Assessment_Report.docx",
-        "file_3_url": f"https://it-assessment-api.onrender.com/files/{session_id}/IT_Current_Status_Assessment_Report.docx",
-        "file_4_name": "IT_Current_Status_Executive_Report.pptx",
-        "file_4_url": f"https://it-assessment-api.onrender.com/files/{session_id}/IT_Current_Status_Executive_Report.pptx"
+        "email": email,
+        "hw_gap_file": hw_gap_file,
+        "sw_gap_file": sw_gap_file,
+        "docx_report": docx_path,
+        "pptx_summary": pptx_path
     }
-
-    try:
-        response = requests.post(next_action_webhook, json=payload)
-        print(f"📤 Sent results to next module. Status: {response.status_code}")
-    except Exception as e:
-        print(f"❌ Failed to notify next GPT module: {e}")
