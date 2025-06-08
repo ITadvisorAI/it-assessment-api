@@ -1,3 +1,4 @@
+
 import os
 import pandas as pd
 import requests
@@ -17,16 +18,22 @@ def load_tier_matrix(filepath):
     df = pd.read_excel(filepath)
     return df
 
+def convert_to_download_url(google_drive_url):
+    if "/edit?" in google_drive_url:
+        return google_drive_url.replace("/edit?", "/export?format=xlsx&")
+    return google_drive_url
+
 def process_excel_file(file_info, tier_matrix):
-    file_path = file_info["file_path"]
-    logging.info(f"📂 Processing Excel file: {file_path}")
-    df = pd.read_excel(file_path)
+    file_url = convert_to_download_url(file_info["file_url"])
+    logging.info(f"📂 Downloading and processing Excel file from: {file_url}")
+    df = pd.read_excel(file_url)
 
     if 'Device Name' in df.columns:
         df['Tier'] = "Unknown"
         df['Recommended Replacement'] = df['Device Name'].apply(fetch_latest_device_replacement)
 
-    output_path = os.path.join(OUTPUT_DIR, f"classified_{os.path.basename(file_path)}")
+    filename = os.path.basename(file_info["file_name"])
+    output_path = os.path.join(OUTPUT_DIR, f"classified_{filename}")
     df.to_excel(output_path, index=False)
     logging.info(f"✅ Saved classified Excel to: {output_path}")
     return output_path, df
@@ -45,9 +52,9 @@ def generate_assessment(session_id, email, files, output_folder_url):
     tier_matrix = load_tier_matrix(tier_matrix_path)
 
     for f in files:
-        if f["type"] == "asset_inventory" and "hardware" in f["file_name"].lower():
+        if f["type"] == "asset_inventory" and "server" in f["file_name"].lower():
             hw_gap_file, hw_data = process_excel_file(f, tier_matrix)
-        elif f["type"] == "asset_inventory" and "software" in f["file_name"].lower():
+        elif f["type"] == "asset_inventory" and "application" in f["file_name"].lower():
             sw_gap_file, sw_data = process_excel_file(f, tier_matrix)
 
     docx_path = generate_docx_report(session_id, email, hw_data, sw_data)
