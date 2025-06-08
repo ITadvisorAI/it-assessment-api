@@ -13,17 +13,9 @@ logging.basicConfig(level=logging.INFO)
 TEMPLATE_DIR = "templates"
 OUTPUT_DIR = "output"
 
-def classify_device(device_name, tier_matrix):
-    device_name = device_name.lower()
-    for keyword, tier in tier_matrix.items():
-        if keyword in device_name:
-            return tier
-    return "Unknown"
-
 def load_tier_matrix(filepath):
     df = pd.read_excel(filepath)
-    tier_mapping = dict(zip(df['Keyword'].str.lower(), df['Tier']))
-    return tier_mapping
+    return df  # Return the entire DataFrame for use in direct comparison
 
 def process_excel_file(file_info, tier_matrix):
     file_path = file_info["file_path"]
@@ -31,7 +23,8 @@ def process_excel_file(file_info, tier_matrix):
     df = pd.read_excel(file_path)
 
     if 'Device Name' in df.columns:
-        df['Tier'] = df['Device Name'].apply(lambda name: classify_device(name, tier_matrix))
+        # If tier_matrix is a DataFrame with detailed mapping, logic here must be defined
+        df['Tier'] = "Unknown"  # Placeholder: modify with your tier logic if applicable
         df['Recommended Replacement'] = df['Device Name'].apply(fetch_latest_device_replacement)
 
     output_path = os.path.join(OUTPUT_DIR, f"classified_{os.path.basename(file_path)}")
@@ -74,7 +67,7 @@ def generate_assessment(session_id, email, files, output_folder_url):
         "pptx_summary": pptx_path
     }
 
-# ✅ Minimal addition to support app.py
+# ✅ Called by app.py
 def process_assessment(data):
     return generate_assessment(
         session_id=data.get("session_id"),
