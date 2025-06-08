@@ -20,8 +20,16 @@ def generate_assessment(session_id, email, goal, files, next_action_webhook):
         local_path = os.path.join(session_path, file_name)
 
         # Simulate download (actual logic may involve URL fetching)
+        import requests
+
+    try:
+        response = requests.get(file_url)
+        response.raise_for_status()
         with open(local_path, "wb") as f:
-            f.write(open(file_url, "rb").read())
+            f.write(response.content)
+    except Exception as e:
+        print(f"❌ Failed to download file from {file_url}: {e}")
+        continue  # skip this file and move to the next
 
         if "hardware" in ftype or "hw" in file_name.lower():
             hw_file_path = local_path
