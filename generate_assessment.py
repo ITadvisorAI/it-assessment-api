@@ -6,7 +6,7 @@ import logging
 from market_lookup import fetch_latest_device_replacement
 from visualization import generate_visual_charts
 from report_docx import generate_docx_report
-from report_pptx import generate_pptx_report
+from report_pptx import generate_pptx_report  # or alias as needed
 
 logging.basicConfig(level=logging.INFO)
 
@@ -15,7 +15,7 @@ OUTPUT_DIR = "output"
 
 def load_tier_matrix(filepath):
     df = pd.read_excel(filepath)
-    return df  # Return the entire DataFrame for use in direct comparison
+    return df
 
 def process_excel_file(file_info, tier_matrix):
     file_path = file_info["file_path"]
@@ -23,8 +23,7 @@ def process_excel_file(file_info, tier_matrix):
     df = pd.read_excel(file_path)
 
     if 'Device Name' in df.columns:
-        # If tier_matrix is a DataFrame with detailed mapping, logic here must be defined
-        df['Tier'] = "Unknown"  # Placeholder: modify with your tier logic if applicable
+        df['Tier'] = "Unknown"
         df['Recommended Replacement'] = df['Device Name'].apply(fetch_latest_device_replacement)
 
     output_path = os.path.join(OUTPUT_DIR, f"classified_{os.path.basename(file_path)}")
@@ -52,7 +51,7 @@ def generate_assessment(session_id, email, files, output_folder_url):
             sw_gap_file, sw_data = process_excel_file(f, tier_matrix)
 
     docx_path = generate_docx_report(session_id, email, hw_data, sw_data)
-    pptx_path = generate_pptx_summary(session_id, email, hw_data, sw_data)
+    pptx_path = generate_pptx_report(session_id, email, hw_data, sw_data)
 
     charts = generate_visual_charts(hw_data, sw_data)
     logging.info(f"📊 Charts generated: {charts}")
@@ -67,7 +66,6 @@ def generate_assessment(session_id, email, files, output_folder_url):
         "pptx_summary": pptx_path
     }
 
-# ✅ Called by app.py
 def process_assessment(data):
     return generate_assessment(
         session_id=data.get("session_id"),
