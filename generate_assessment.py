@@ -62,6 +62,14 @@ def generate_assessment(session_id, email, goal, files, next_action_webhook):
         "file_4_name": "IT_Current_Status_Executive_Report.pptx",
         "file_4_url": f"https://it-assessment-api.onrender.com/files/{session_id}/IT_Current_Status_Executive_Report.pptx"
     }
+    def process_assessment(data):
+    session_id = data.get("session_id")
+    email = data.get("email")
+    goal = data.get("goal", "project plan")
+    files = data.get("files", [])
+    next_action_webhook = data.get("next_action_webhook", "")
+
+    generate_assessment(session_id, email, goal, files, next_action_webhook)
 
     try:
         response = requests.post(next_action_webhook, json=payload)
