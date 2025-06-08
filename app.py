@@ -23,7 +23,7 @@ def start_assessment():
             return jsonify({"error": "Missing required fields."}), 400
 
         print(f"➡️ Calling process_assessment for session: {session_id}", flush=True)
-        result = process_assessment(session_id, email, goal, files, next_action_webhook)
+        result = process_assessment(data)
         print("✅ Assessment completed. Returning result.\n", flush=True)
         return jsonify({"status": "assessment_done", "result": result}), 200
 
