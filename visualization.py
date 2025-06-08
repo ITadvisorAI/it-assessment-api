@@ -1,39 +1,27 @@
 import os
-import pandas as pd
 import matplotlib.pyplot as plt
-import logging
 
-logging.basicConfig(level=logging.INFO)
+def generate_charts(hw_df, sw_df, session_folder):
+    os.makedirs(os.path.join(session_folder, "charts"), exist_ok=True)
 
-def generate_visual_charts(hw_data, sw_data, session_folder):
-    charts = []
-
-    os.makedirs(session_folder, exist_ok=True)
-
-    # Chart 1: Hardware Tier Distribution
-    if isinstance(hw_data, pd.DataFrame) and 'Tier' in hw_data.columns:
-        chart_path = os.path.join(session_folder, "hw_tier_distribution.png")
-        tier_counts = hw_data['Tier'].value_counts()
-        tier_counts.plot(kind='bar', title='Hardware Tier Distribution')
-        plt.xlabel("Tier")
-        plt.ylabel("Count")
-        plt.tight_layout()
+    def pie_chart(data, column, title, filename):
+        counts = data[column].value_counts()
+        plt.figure(figsize=(5, 5))
+        plt.pie(counts, labels=counts.index, autopct='%1.1f%%', startangle=140)
+        plt.title(title)
+        chart_path = os.path.join(session_folder, "charts", filename)
         plt.savefig(chart_path)
         plt.close()
-        logging.info(f"📊 Saved hardware chart: {chart_path}")
-        charts.append(chart_path)
+        return chart_path
 
-    # Chart 2: Software Tier Distribution
-    if isinstance(sw_data, pd.DataFrame) and 'Tier' in sw_data.columns:
-        chart_path = os.path.join(session_folder, "sw_tier_distribution.png")
-        tier_counts = sw_data['Tier'].value_counts()
-        tier_counts.plot(kind='bar', color='orange', title='Software Tier Distribution')
-        plt.xlabel("Tier")
-        plt.ylabel("Count")
-        plt.tight_layout()
-        plt.savefig(chart_path)
-        plt.close()
-        logging.info(f"📊 Saved software chart: {chart_path}")
-        charts.append(chart_path)
+    charts = {
+        "hw_tier_chart": pie_chart(hw_df, "Tier", "Hardware Tier Distribution", "hw_tier_chart.png"),
+        "hw_status_chart": pie_chart(hw_df, "Status", "Hardware Status", "hw_status_chart.png"),
+        "sw_tier_chart": pie_chart(sw_df, "Tier", "Software Tier Distribution", "sw_tier_chart.png"),
+        "sw_status_chart": pie_chart(sw_df, "Status", "Software Status", "sw_status_chart.png")
+    }
 
     return charts
+
+# Patch to match expected import name
+generate_visual_charts = generate_charts
