@@ -1,4 +1,3 @@
-
 import os
 import pandas as pd
 import requests
@@ -60,7 +59,8 @@ def generate_assessment(session_id, email, files, output_folder_url):
     docx_path = generate_docx_report(session_id, email, hw_data, sw_data)
     pptx_path = generate_pptx_report(session_id, email, hw_data, sw_data)
 
-    charts = generate_visual_charts(hw_data, sw_data)
+    # 🔧 FIX: Corrected the missing argument by using output_folder_url
+    charts = generate_visual_charts(hw_data, sw_data, output_folder_url)
     logging.info(f"📊 Charts generated: {charts}")
 
     logging.info("🎉 Infrastructure assessment completed.")
