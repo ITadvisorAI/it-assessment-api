@@ -2,7 +2,7 @@ import os
 import pandas as pd
 import requests
 from market_lookup import suggest_hw_replacements, suggest_sw_replacements
-from visualization import generate_charts
+from visualization import generate_visual_charts
 from report_docx import generate_docx_report
 from report_pptx import generate_pptx_report
 
@@ -36,7 +36,7 @@ def generate_assessment(session_id, email, goal, files, next_action_webhook):
         sw_df = pd.read_excel(sw_file_path)
         sw_df = suggest_sw_replacements(sw_df)
 
-    chart_paths = generate_charts(session_id, hw_df, sw_df)
+    chart_paths = generate_visual_charts(hw_df, sw_df, session_id)
 
     generate_docx_report(session_id, hw_df, sw_df, chart_paths)
     generate_pptx_report(session_id, hw_df, sw_df, chart_paths)
