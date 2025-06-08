@@ -1,82 +1,70 @@
 import os
 import pandas as pd
 import requests
-import json
-import logging
-from market_lookup import fetch_latest_device_replacement
-from visualization import generate_visual_charts
+from market_lookup import suggest_hw_replacements, suggest_sw_replacements
+from visualization import generate_charts
 from report_docx import generate_docx_report
-from report_pptx import generate_pptx_report  # or alias as needed
+from report_pptx import generate_pptx_report
 
-logging.basicConfig(level=logging.INFO)
+def generate_assessment(session_id, email, goal, files, next_action_webhook):
+    session_path = os.path.join("temp_sessions", session_id)
+    os.makedirs(session_path, exist_ok=True)
 
-TEMPLATE_DIR = "templates"
-OUTPUT_DIR = "output"
+    hw_df = sw_df = None
+    hw_file_path = sw_file_path = ""
 
-def load_tier_matrix(filepath):
-    df = pd.read_excel(filepath)
-    return df
+    for file in files:
+        ftype = file['type'].lower()
+        file_url = file['file_url']
+        file_name = file['file_name']
+        local_path = os.path.join(session_path, file_name)
 
-def convert_to_download_url(google_drive_url):
-    if "/edit?" in google_drive_url:
-        return google_drive_url.replace("/edit?", "/export?format=xlsx&")
-    return google_drive_url
+        # Simulate download (actual logic may involve URL fetching)
+        with open(local_path, "wb") as f:
+            f.write(open(file_url, "rb").read())
 
-def process_excel_file(file_info, tier_matrix):
-    file_url = convert_to_download_url(file_info["file_url"])
-    logging.info(f"📂 Downloading and processing Excel file from: {file_url}")
-    df = pd.read_excel(file_url)
+        if "hardware" in ftype or "hw" in file_name.lower():
+            hw_file_path = local_path
+        elif "software" in ftype or "sw" in file_name.lower():
+            sw_file_path = local_path
 
-    if 'Device Name' in df.columns:
-        df['Tier'] = "Unknown"
-        df['Recommended Replacement'] = df['Device Name'].apply(fetch_latest_device_replacement)
+    if hw_file_path:
+        hw_df = pd.read_excel(hw_file_path)
+        hw_df = suggest_hw_replacements(hw_df)
 
-    filename = os.path.basename(file_info["file_name"])
-    output_path = os.path.join(OUTPUT_DIR, f"classified_{filename}")
-    df.to_excel(output_path, index=False)
-    logging.info(f"✅ Saved classified Excel to: {output_path}")
-    return output_path, df
+    if sw_file_path:
+        sw_df = pd.read_excel(sw_file_path)
+        sw_df = suggest_sw_replacements(sw_df)
 
-def generate_assessment(session_id, email, files, output_folder_url):
-    logging.info("🚀 Starting infrastructure assessment generation...")
+    chart_paths = generate_charts(session_id, hw_df, sw_df)
 
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    generate_docx_report(session_id, hw_df, sw_df, chart_paths)
+    generate_pptx_report(session_id, hw_df, sw_df, chart_paths)
 
-    hw_gap_file = None
-    sw_gap_file = None
-    hw_data = None
-    sw_data = None
+    # Save Excel gap files
+    if hw_df is not None:
+        hw_df.to_excel(os.path.join(session_path, f"HWGapAnalysis_{session_id}.xlsx"), index=False)
+    if sw_df is not None:
+        sw_df.to_excel(os.path.join(session_path, f"SWGapAnalysis_{session_id}.xlsx"), index=False)
 
-    tier_matrix_path = os.path.join(TEMPLATE_DIR, "ClassificationTier.xlsx")
-    tier_matrix = load_tier_matrix(tier_matrix_path)
-
-    for f in files:
-        if f["type"] == "asset_inventory" and "server" in f["file_name"].lower():
-            hw_gap_file, hw_data = process_excel_file(f, tier_matrix)
-        elif f["type"] == "asset_inventory" and "application" in f["file_name"].lower():
-            sw_gap_file, sw_data = process_excel_file(f, tier_matrix)
-
-    docx_path = generate_docx_report(session_id, email, hw_data, sw_data)
-    pptx_path = generate_pptx_report(session_id, email, hw_data, sw_data)
-
-    # 🔧 FIX: Corrected the missing argument by using output_folder_url
-    charts = generate_visual_charts(hw_data, sw_data, output_folder_url)
-    logging.info(f"📊 Charts generated: {charts}")
-
-    logging.info("🎉 Infrastructure assessment completed.")
-    return {
+    # Send to next GPT module
+    payload = {
         "session_id": session_id,
-        "email": email,
-        "hw_gap_file": hw_gap_file,
-        "sw_gap_file": sw_gap_file,
-        "docx_report": docx_path,
-        "pptx_summary": pptx_path
+        "gpt_module": "it_assessment",
+        "status": "complete",
+        "message": "Assessment completed",
+        "file_1_name": f"HWGapAnalysis_{session_id}.xlsx",
+        "file_1_url": f"https://it-assessment-api.onrender.com/files/HWGapAnalysis_{session_id}.xlsx",
+        "file_2_name": f"SWGapAnalysis_{session_id}.xlsx",
+        "file_2_url": f"https://it-assessment-api.onrender.com/files/SWGapAnalysis_{session_id}.xlsx",
+        "file_3_name": "IT_Current_Status_Assessment_Report.docx",
+        "file_3_url": f"https://it-assessment-api.onrender.com/files/{session_id}/IT_Current_Status_Assessment_Report.docx",
+        "file_4_name": "IT_Current_Status_Executive_Report.pptx",
+        "file_4_url": f"https://it-assessment-api.onrender.com/files/{session_id}/IT_Current_Status_Executive_Report.pptx"
     }
 
-def process_assessment(data):
-    return generate_assessment(
-        session_id=data.get("session_id"),
-        email=data.get("email"),
-        files=data.get("files"),
-        output_folder_url=data.get("output_folder_url")
-    )
+    try:
+        response = requests.post(next_action_webhook, json=payload)
+        print(f"📤 Sent results to next module. Status: {response.status_code}")
+    except Exception as e:
+        print(f"❌ Failed to notify next GPT module: {e}")
