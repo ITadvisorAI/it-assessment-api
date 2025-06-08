@@ -78,5 +78,5 @@ def process_assessment(data):
         session_id=data.get("session_id"),
         email=data.get("email"),
         files=data.get("files"),
-        output_folder_url=data.get("output_folder_url", "")
+        output_folder_url=data.get("output_folder_url")
     )
