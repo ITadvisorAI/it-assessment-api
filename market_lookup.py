@@ -1,3 +1,4 @@
+
 import random
 import pandas as pd
 
@@ -36,5 +37,5 @@ def suggest_sw_replacements(sw_df):
             updated_df.at[idx, key] = value
     return updated_df
 
-# === Compatibility alias for expected import in generate_assessment.py ===
+# Alias to match usage in generate_assessment.py
 fetch_latest_device_replacement = fetch_market_device_data
