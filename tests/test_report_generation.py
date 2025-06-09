@@ -3,6 +3,8 @@ import sys
 import pandas as pd
 import zipfile
 import matplotlib
+from docx import Document
+from pptx import Presentation
 
 sys.path.insert(0, os.getcwd())
 
@@ -29,8 +31,15 @@ def test_reports_include_charts(tmp_path, monkeypatch):
     with zipfile.ZipFile(docx_path) as zf:
         assert any(name.startswith("word/media/") for name in zf.namelist())
 
+    # verify template content preserved
+    doc = Document(docx_path)
+    assert doc.paragraphs[0].text == "IT Infrastructure Current State Assessment Report"
+
     with zipfile.ZipFile(pptx_path) as zf:
         assert any(name.startswith("ppt/media/") for name in zf.namelist())
+
+    ppt = Presentation(pptx_path)
+    assert ppt.slides[0].shapes.title.text == "Executive Summary"
 
 
 def test_reports_hardware_only(tmp_path, monkeypatch):

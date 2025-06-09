@@ -5,6 +5,8 @@ from pptx.util import Inches, Pt
 from pptx.enum.shapes import MSO_SHAPE
 from pptx.dml.color import RGBColor
 
+TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
+
 def generate_pptx_report(session_id, hw_df, sw_df, chart_paths):
     """Generate an executive summary PPTX report.
 
@@ -30,7 +32,10 @@ def generate_pptx_report(session_id, hw_df, sw_df, chart_paths):
         os.makedirs(output_dir, exist_ok=True)
         output_path = os.path.join(output_dir, "IT_Current_Status_Executive_Report.pptx")
 
-        prs = Presentation()
+        template_path = os.path.join(
+            TEMPLATES_DIR, "IT_Current_Status_Executive_Report_Template.pptx"
+        )
+        prs = Presentation(template_path)
         title_slide_layout = prs.slide_layouts[0]
         content_layout = prs.slide_layouts[1]
         blank_layout = prs.slide_layouts[6]
