@@ -14,12 +14,19 @@ def generate_charts(hw_df, sw_df, session_folder):
         plt.close()
         return chart_path
 
-    charts = {
-        "hw_tier_chart": pie_chart(hw_df, "Tier", "Hardware Tier Distribution", "hw_tier_chart.png"),
-        "hw_status_chart": pie_chart(hw_df, "Status", "Hardware Status", "hw_status_chart.png"),
-        "sw_tier_chart": pie_chart(sw_df, "Tier", "Software Tier Distribution", "sw_tier_chart.png"),
-        "sw_status_chart": pie_chart(sw_df, "Status", "Software Status", "sw_status_chart.png")
-    }
+    charts = {}
+
+    if hw_df is not None and not hw_df.empty:
+        if "Tier" in hw_df:
+            charts["hw_tier_chart"] = pie_chart(hw_df, "Tier", "Hardware Tier Distribution", "hw_tier_chart.png")
+        if "Status" in hw_df:
+            charts["hw_status_chart"] = pie_chart(hw_df, "Status", "Hardware Status", "hw_status_chart.png")
+
+    if sw_df is not None and not sw_df.empty:
+        if "Tier" in sw_df:
+            charts["sw_tier_chart"] = pie_chart(sw_df, "Tier", "Software Tier Distribution", "sw_tier_chart.png")
+        if "Status" in sw_df:
+            charts["sw_status_chart"] = pie_chart(sw_df, "Status", "Software Status", "sw_status_chart.png")
 
     return charts
 

@@ -41,11 +41,17 @@ def test_reports_hardware_only(tmp_path, monkeypatch):
     hw_df = pd.DataFrame({"Tier": ["1"], "Status": ["Active"]})
     sw_df = None
 
-    docx_path = generate_docx_report(session_id, hw_df, sw_df, {})
-    pptx_path = generate_pptx_report(session_id, hw_df, sw_df, {})
+    session_folder = os.path.join("temp_sessions", session_id)
+    charts = generate_charts(hw_df, sw_df, session_folder)
 
-    assert os.path.exists(docx_path)
-    assert os.path.exists(pptx_path)
+    docx_path = generate_docx_report(session_id, hw_df, sw_df, charts)
+    pptx_path = generate_pptx_report(session_id, hw_df, sw_df, charts)
+
+    with zipfile.ZipFile(docx_path) as zf:
+        assert any(name.startswith("word/media/") for name in zf.namelist())
+
+    with zipfile.ZipFile(pptx_path) as zf:
+        assert any(name.startswith("ppt/media/") for name in zf.namelist())
 
 
 def test_reports_software_only(tmp_path, monkeypatch):
@@ -56,11 +62,17 @@ def test_reports_software_only(tmp_path, monkeypatch):
     hw_df = None
     sw_df = pd.DataFrame({"Tier": ["1"], "Status": ["Active"]})
 
-    docx_path = generate_docx_report(session_id, hw_df, sw_df, {})
-    pptx_path = generate_pptx_report(session_id, hw_df, sw_df, {})
+    session_folder = os.path.join("temp_sessions", session_id)
+    charts = generate_charts(hw_df, sw_df, session_folder)
 
-    assert os.path.exists(docx_path)
-    assert os.path.exists(pptx_path)
+    docx_path = generate_docx_report(session_id, hw_df, sw_df, charts)
+    pptx_path = generate_pptx_report(session_id, hw_df, sw_df, charts)
+
+    with zipfile.ZipFile(docx_path) as zf:
+        assert any(name.startswith("word/media/") for name in zf.namelist())
+
+    with zipfile.ZipFile(pptx_path) as zf:
+        assert any(name.startswith("ppt/media/") for name in zf.namelist())
 
 
 def test_reports_no_data(tmp_path, monkeypatch):
@@ -71,8 +83,11 @@ def test_reports_no_data(tmp_path, monkeypatch):
     hw_df = None
     sw_df = None
 
-    docx_path = generate_docx_report(session_id, hw_df, sw_df, {})
-    pptx_path = generate_pptx_report(session_id, hw_df, sw_df, {})
+    session_folder = os.path.join("temp_sessions", session_id)
+    charts = generate_charts(hw_df, sw_df, session_folder)
+
+    docx_path = generate_docx_report(session_id, hw_df, sw_df, charts)
+    pptx_path = generate_pptx_report(session_id, hw_df, sw_df, charts)
 
     assert os.path.exists(docx_path)
     assert os.path.exists(pptx_path)
