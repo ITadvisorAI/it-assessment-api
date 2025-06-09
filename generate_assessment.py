@@ -6,6 +6,15 @@ from visualization import generate_visual_charts
 from report_docx import generate_docx_report
 from report_pptx import generate_pptx_report
 
+"""Utilities to generate an IT assessment report.
+
+The :func:`generate_assessment` function downloads the provided Excel files
+into a per-session directory. If the ``file_url`` field of an entry starts with
+``http://`` or ``https://`` the file is fetched using :func:`requests.get`.
+Otherwise ``file_url`` is treated as a local path and the file is copied
+directly. The downloaded files are then processed to produce reports and charts.
+"""
+
 def generate_assessment(session_id, email, goal, files, next_action_webhook):
     session_path = os.path.join("temp_sessions", session_id)
     os.makedirs(session_path, exist_ok=True)
@@ -19,9 +28,15 @@ def generate_assessment(session_id, email, goal, files, next_action_webhook):
         file_name = file['file_name']
         local_path = os.path.join(session_path, file_name)
 
-        # Simulate download (actual logic may involve URL fetching)
-        with open(local_path, "wb") as f:
-            f.write(open(file_url, "rb").read())
+        # Download remote files or copy local ones
+        if file_url.startswith(("http://", "https://")):
+            response = requests.get(file_url)
+            response.raise_for_status()
+            with open(local_path, "wb") as f:
+                f.write(response.content)
+        else:
+            with open(file_url, "rb") as src, open(local_path, "wb") as dst:
+                dst.write(src.read())
 
         if "hardware" in ftype or "hw" in file_name.lower():
             hw_file_path = local_path
