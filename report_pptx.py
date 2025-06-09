@@ -43,13 +43,27 @@ def generate_pptx_report(session_id, hw_df, sw_df, chart_paths):
         # HW Summary
         slide = prs.slides.add_slide(content_layout)
         slide.shapes.title.text = "Hardware Summary"
-        hw_summary = f"Total HW Devices: {len(hw_df)}\nTier Distribution:\n{hw_df['Tier'].value_counts().to_string()}" if 'Tier' in hw_df.columns else "No tier data."
+        if hw_df is not None and not hw_df.empty:
+            if 'Tier' in hw_df.columns:
+                tier_text = hw_df['Tier'].value_counts().to_string()
+            else:
+                tier_text = "No tier data."
+            hw_summary = f"Total HW Devices: {len(hw_df)}\nTier Distribution:\n{tier_text}"
+        else:
+            hw_summary = "No hardware data available."
         slide.placeholders[1].text = hw_summary
 
         # SW Summary
         slide = prs.slides.add_slide(content_layout)
         slide.shapes.title.text = "Software Summary"
-        sw_summary = f"Total SW Packages: {len(sw_df)}\nTier Distribution:\n{sw_df['Tier'].value_counts().to_string()}" if 'Tier' in sw_df.columns else "No tier data."
+        if sw_df is not None and not sw_df.empty:
+            if 'Tier' in sw_df.columns:
+                tier_text = sw_df['Tier'].value_counts().to_string()
+            else:
+                tier_text = "No tier data."
+            sw_summary = f"Total SW Packages: {len(sw_df)}\nTier Distribution:\n{tier_text}"
+        else:
+            sw_summary = "No software data available."
         slide.placeholders[1].text = sw_summary
 
         # Charts

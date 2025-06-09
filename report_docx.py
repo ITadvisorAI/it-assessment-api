@@ -34,7 +34,7 @@ def generate_docx_report(session_id, hw_df, sw_df, chart_paths):
         document.add_paragraph(session_id)
 
         document.add_heading('Hardware Summary', level=1)
-        if not hw_df.empty:
+        if hw_df is not None and not hw_df.empty:
             table = document.add_table(rows=1, cols=len(hw_df.columns))
             hdr_cells = table.rows[0].cells
             for i, col in enumerate(hw_df.columns):
@@ -47,7 +47,7 @@ def generate_docx_report(session_id, hw_df, sw_df, chart_paths):
             document.add_paragraph("No hardware data available.")
 
         document.add_heading('Software Summary', level=1)
-        if not sw_df.empty:
+        if sw_df is not None and not sw_df.empty:
             table = document.add_table(rows=1, cols=len(sw_df.columns))
             hdr_cells = table.rows[0].cells
             for i, col in enumerate(sw_df.columns):
