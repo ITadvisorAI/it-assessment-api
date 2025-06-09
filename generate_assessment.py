@@ -19,15 +19,14 @@ def generate_assessment(session_id, email, goal, files, next_action_webhook):
         file_name = file['file_name']
         local_path = os.path.join(session_path, file_name)
 
-        # Download file from URL
+        # Download from remote URL (fixed)
         try:
             response = requests.get(file_url)
-            response.raise_for_status()
             with open(local_path, "wb") as f:
                 f.write(response.content)
         except Exception as e:
-            print(f"❌ Failed to download file from {file_url}: {e}")
-            continue  # skip this file and go to the next
+            print(f"❌ Failed to download file {file_url} – {e}")
+            continue  # skip this file and move to the next
 
         if "hardware" in ftype or "hw" in file_name.lower():
             hw_file_path = local_path
@@ -53,7 +52,16 @@ def generate_assessment(session_id, email, goal, files, next_action_webhook):
     if sw_df is not None:
         sw_df.to_excel(os.path.join(session_path, f"SWGapAnalysis_{session_id}.xlsx"), index=False)
 
-    # Send to next GPT module
+def process_assessment(data):
+    session_id = data.get("session_id")
+    email = data.get("email")
+    goal = data.get("goal", "project plan")
+    files = data.get("files", [])
+    next_action_webhook = data.get("next_action_webhook", "")
+
+    generate_assessment(session_id, email, goal, files, next_action_webhook)
+
+    # ✅ Payload is generated here after processing
     payload = {
         "session_id": session_id,
         "gpt_module": "it_assessment",
@@ -69,17 +77,10 @@ def generate_assessment(session_id, email, goal, files, next_action_webhook):
         "file_4_url": f"https://it-assessment-api.onrender.com/files/{session_id}/IT_Current_Status_Executive_Report.pptx"
     }
 
+    # ✅ Send to next module (or log failure)
     try:
-        response = requests.post(next_action_webhook, json=payload)
-        print(f"📤 Sent results to next module. Status: {response.status_code}")
+        if next_action_webhook:
+            response = requests.post(next_action_webhook, json=payload)
+            print(f"📤 Sent results to next module. Status: {response.status_code}")
     except Exception as e:
         print(f"❌ Failed to notify next GPT module: {e}")
-
-def process_assessment(data):
-    session_id = data.get("session_id")
-    email = data.get("email")
-    goal = data.get("goal", "project plan")
-    files = data.get("files", [])
-    next_action_webhook = data.get("next_action_webhook", "")
-
-    generate_assessment(session_id, email, goal, files, next_action_webhook)
