@@ -26,6 +26,11 @@ def setup_api_monkeypatch(monkeypatch):
         "generate_pptx_report",
         lambda session_id, *a, **k: write_placeholder(os.path.join("temp_sessions", session_id, "IT_Current_Status_Executive_Report.pptx")),
     )
+    monkeypatch.setattr(
+        generate_assessment,
+        "upload_file_to_drive",
+        lambda path, name=None, folder_id=None: f"https://drive/{os.path.basename(path)}",
+    )
 
     class DummyResp:
         status_code = 200

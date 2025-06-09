@@ -4,6 +4,7 @@ import requests
 from market_lookup import suggest_hw_replacements, suggest_sw_replacements
 from visualization import generate_visual_charts
 from report_docx import generate_docx_report
+from drive_utils import upload_file_to_drive
 from report_pptx import generate_pptx_report
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
@@ -93,11 +94,23 @@ def generate_assessment(session_id, email, goal, files, next_action_webhook):
     if sw_df is not None:
         sw_gap_path = os.path.join(session_path, f"SWGapAnalysis_{session_id}.xlsx")
         sw_df.to_excel(sw_gap_path, index=False)
+    folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
+    drive_links = {}
+    if hw_gap_path:
+        drive_links["file_1_drive_url"] = upload_file_to_drive(hw_gap_path, os.path.basename(hw_gap_path), folder_id)
+    if sw_gap_path:
+        drive_links["file_2_drive_url"] = upload_file_to_drive(sw_gap_path, os.path.basename(sw_gap_path), folder_id)
+    if docx_path:
+        drive_links["file_3_drive_url"] = upload_file_to_drive(docx_path, os.path.basename(docx_path), folder_id)
+    if pptx_path:
+        drive_links["file_4_drive_url"] = upload_file_to_drive(pptx_path, os.path.basename(pptx_path), folder_id)
+
 
     # Send to next GPT module
     payload = {
         "session_id": session_id,
         "gpt_module": "it_assessment",
+
         "status": "complete",
         "message": "Assessment completed",
         "file_1_name": f"HWGapAnalysis_{session_id}.xlsx",
@@ -109,6 +122,8 @@ def generate_assessment(session_id, email, goal, files, next_action_webhook):
         "file_4_name": "IT_Current_Status_Executive_Report.pptx",
         "file_4_url": f"/files/{session_id}/IT_Current_Status_Executive_Report.pptx"
     }
+    payload.update(drive_links)
+
 
     try:
         response = requests.post(next_action_webhook, json=payload)
