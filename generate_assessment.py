@@ -52,14 +52,17 @@ def generate_assessment(session_id, email, goal, files, next_action_webhook):
         sw_df = suggest_sw_replacements(sw_df)
 
     chart_paths = generate_visual_charts(hw_df, sw_df, session_id)
-    generate_docx_report(session_id, hw_df, sw_df, chart_paths)
-    generate_pptx_report(session_id, hw_df, sw_df, chart_paths)
+    docx_path = generate_docx_report(session_id, hw_df, sw_df, chart_paths)
+    pptx_path = generate_pptx_report(session_id, hw_df, sw_df, chart_paths)
 
     # Save Excel gap files
+    hw_gap_path = sw_gap_path = None
     if hw_df is not None:
-        hw_df.to_excel(os.path.join(session_path, f"HWGapAnalysis_{session_id}.xlsx"), index=False)
+        hw_gap_path = os.path.join(session_path, f"HWGapAnalysis_{session_id}.xlsx")
+        hw_df.to_excel(hw_gap_path, index=False)
     if sw_df is not None:
-        sw_df.to_excel(os.path.join(session_path, f"SWGapAnalysis_{session_id}.xlsx"), index=False)
+        sw_gap_path = os.path.join(session_path, f"SWGapAnalysis_{session_id}.xlsx")
+        sw_df.to_excel(sw_gap_path, index=False)
 
     # Send to next GPT module
     payload = {
@@ -68,13 +71,13 @@ def generate_assessment(session_id, email, goal, files, next_action_webhook):
         "status": "complete",
         "message": "Assessment completed",
         "file_1_name": f"HWGapAnalysis_{session_id}.xlsx",
-        "file_1_url": f"https://it-assessment-api.onrender.com/files/HWGapAnalysis_{session_id}.xlsx",
+        "file_1_url": f"/files/{session_id}/HWGapAnalysis_{session_id}.xlsx",
         "file_2_name": f"SWGapAnalysis_{session_id}.xlsx",
-        "file_2_url": f"https://it-assessment-api.onrender.com/files/SWGapAnalysis_{session_id}.xlsx",
+        "file_2_url": f"/files/{session_id}/SWGapAnalysis_{session_id}.xlsx",
         "file_3_name": "IT_Current_Status_Assessment_Report.docx",
-        "file_3_url": f"https://it-assessment-api.onrender.com/files/{session_id}/IT_Current_Status_Assessment_Report.docx",
+        "file_3_url": f"/files/{session_id}/IT_Current_Status_Assessment_Report.docx",
         "file_4_name": "IT_Current_Status_Executive_Report.pptx",
-        "file_4_url": f"https://it-assessment-api.onrender.com/files/{session_id}/IT_Current_Status_Executive_Report.pptx"
+        "file_4_url": f"/files/{session_id}/IT_Current_Status_Executive_Report.pptx"
     }
 
     try:
@@ -83,6 +86,8 @@ def generate_assessment(session_id, email, goal, files, next_action_webhook):
     except Exception as e:
         print(f"❌ Failed to notify next GPT module: {e}")
 
+    return payload
+
 def process_assessment(data):
     session_id = data.get("session_id")
     email = data.get("email")
@@ -90,4 +95,4 @@ def process_assessment(data):
     files = data.get("files", [])
     next_action_webhook = data.get("next_action_webhook", "")
 
-    generate_assessment(session_id, email, goal, files, next_action_webhook)
+    return generate_assessment(session_id, email, goal, files, next_action_webhook)
