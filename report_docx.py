@@ -3,6 +3,8 @@ from docx import Document
 from docx.shared import Inches
 import os
 
+TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
+
 def generate_docx_report(session_id, hw_df, sw_df, chart_paths):
     """Generate a detailed DOCX report.
 
@@ -27,8 +29,10 @@ def generate_docx_report(session_id, hw_df, sw_df, chart_paths):
         output_path = os.path.join("temp_sessions", session_id, "IT_Current_Status_Assessment_Report.docx")
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-        document = Document()
-        document.add_heading('IT Infrastructure Current Status Report', 0)
+        template_path = os.path.join(
+            TEMPLATES_DIR, "IT_Current_Status_Assessment_Report_Template.docx"
+        )
+        document = Document(template_path)
 
         document.add_heading('Session ID', level=1)
         document.add_paragraph(session_id)
