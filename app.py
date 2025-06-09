@@ -1,7 +1,7 @@
 import os
 import json
 import traceback
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from generate_assessment import process_assessment
 
 app = Flask(__name__)
@@ -31,6 +31,12 @@ def start_assessment():
         print("❌ Error in /start_assessment:", str(e), flush=True)
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/files/<path:filename>", methods=["GET"])
+def serve_file(filename):
+    """Serve generated files from the ``temp_sessions`` folder."""
+    return send_from_directory("temp_sessions", filename, as_attachment=True)
 
 @app.route("/", methods=["GET"])
 def index():
