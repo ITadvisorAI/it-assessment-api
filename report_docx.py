@@ -4,6 +4,25 @@ from docx.shared import Inches
 import os
 
 def generate_docx_report(session_id, hw_df, sw_df, chart_paths):
+    """Generate a detailed DOCX report.
+
+    Parameters
+    ----------
+    session_id : str
+        Unique identifier for the current assessment session.
+    hw_df : pandas.DataFrame
+        Hardware dataframe to summarize.
+    sw_df : pandas.DataFrame
+        Software dataframe to summarize.
+    chart_paths : dict
+        Dictionary of chart names to file paths returned by
+        :func:`visualization.generate_charts`.
+
+    Returns
+    -------
+    str or None
+        Path to the generated DOCX file or ``None`` if generation failed.
+    """
     try:
         output_path = os.path.join("temp_sessions", session_id, "IT_Current_Status_Assessment_Report.docx")
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -41,7 +60,7 @@ def generate_docx_report(session_id, hw_df, sw_df, chart_paths):
             document.add_paragraph("No software data available.")
 
         document.add_heading('Charts & Visualizations', level=1)
-        for chart_path in chart_paths:
+        for chart_path in chart_paths.values():
             if os.path.exists(chart_path):
                 document.add_picture(chart_path, width=Inches(5.5))
             else:

@@ -6,6 +6,25 @@ from pptx.enum.shapes import MSO_SHAPE
 from pptx.dml.color import RGBColor
 
 def generate_pptx_report(session_id, hw_df, sw_df, chart_paths):
+    """Generate an executive summary PPTX report.
+
+    Parameters
+    ----------
+    session_id : str
+        Unique identifier for the current assessment session.
+    hw_df : pandas.DataFrame
+        Hardware dataframe to summarize.
+    sw_df : pandas.DataFrame
+        Software dataframe to summarize.
+    chart_paths : dict
+        Dictionary of chart names to file paths returned by
+        :func:`visualization.generate_charts`.
+
+    Returns
+    -------
+    str or None
+        Path to the generated PPTX file or ``None`` if generation failed.
+    """
     try:
         output_dir = os.path.join("temp_sessions", session_id)
         os.makedirs(output_dir, exist_ok=True)
@@ -34,7 +53,7 @@ def generate_pptx_report(session_id, hw_df, sw_df, chart_paths):
         slide.placeholders[1].text = sw_summary
 
         # Charts
-        for path in chart_paths:
+        for path in chart_paths.values():
             if os.path.exists(path):
                 slide = prs.slides.add_slide(blank_layout)
                 left = Inches(1)
