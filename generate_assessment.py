@@ -94,6 +94,7 @@ def generate_assessment(session_id, email, goal, files):
     if sw_df is not None:
         sw_gap_path = os.path.join(session_path, f"SWGapAnalysis_{session_id}.xlsx")
         sw_df.to_excel(sw_gap_path, index=False)
+
     folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
     drive_links = {}
     if hw_gap_path:
@@ -105,12 +106,10 @@ def generate_assessment(session_id, email, goal, files):
     if pptx_path:
         drive_links["file_4_drive_url"] = upload_file_to_drive(pptx_path, os.path.basename(pptx_path), folder_id)
 
-
-    # Send to next GPT module
+    # Return result payload
     payload = {
         "session_id": session_id,
         "gpt_module": "it_assessment",
-
         "status": "complete",
         "message": "Assessment completed",
         "file_1_name": f"HWGapAnalysis_{session_id}.xlsx",
@@ -126,11 +125,12 @@ def generate_assessment(session_id, email, goal, files):
 
     return payload
 
-    def process_assessment(data):
-        session_id = data.get("session_id")
-        email = data.get("email")
-        goal = data.get("goal", "project plan")
-        files = data.get("files", [])
-    
+
+def process_assessment(data):
+    session_id = data.get("session_id")
+    email = data.get("email")
+    goal = data.get("goal", "project plan")
+    files = data.get("files", [])
+
     print("[DEBUG] Entered process_assessment()", flush=True)
     return generate_assessment(session_id, email, goal, files)
