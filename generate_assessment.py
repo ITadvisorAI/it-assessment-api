@@ -18,7 +18,7 @@ Otherwise ``file_url`` is treated as a local path and the file is copied
 directly. The downloaded files are then processed to produce reports and charts.
 """
 
-def generate_assessment(session_id, email, goal, files, next_action_webhook):
+def generate_assessment(session_id, email, goal, files):
     session_path = os.path.join("temp_sessions", session_id)
     os.makedirs(session_path, exist_ok=True)
 
