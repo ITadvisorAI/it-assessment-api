@@ -124,20 +124,13 @@ def generate_assessment(session_id, email, goal, files):
     }
     payload.update(drive_links)
 
-
-    try:
-        response = requests.post(next_action_webhook, json=payload)
-        print(f"📤 Sent results to next module. Status: {response.status_code}")
-    except Exception as e:
-        print(f"❌ Failed to notify next GPT module: {e}")
-
     return payload
 
-def process_assessment(data):
-    session_id = data.get("session_id")
-    email = data.get("email")
-    goal = data.get("goal", "project plan")
-    files = data.get("files", [])
-    next_action_webhook = data.get("next_action_webhook", "")
-
-    return generate_assessment(session_id, email, goal, files, next_action_webhook)
+    def process_assessment(data):
+        session_id = data.get("session_id")
+        email = data.get("email")
+        goal = data.get("goal", "project plan")
+        files = data.get("files", [])
+    
+    print("[DEBUG] Entered process_assessment()", flush=True)
+    return generate_assessment(session_id, email, goal, files)
