@@ -56,7 +56,6 @@ def generate_assessment(session_id, email, goal, files, next_action_webhook=""):
         if df is not None and not df.empty and "Tier Total Score" in df.columns:
             return df.merge(classification_df, how="left", left_on="Tier Total Score", right_on="Score")
         return df
-
     if hw_file_path:
         hw_inventory = pd.read_excel(hw_file_path)
         hw_df = merge_with_template(hw_base_df, hw_inventory)
