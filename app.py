@@ -1,47 +1,58 @@
 import os
-import json
-import traceback
-from flask import Flask, request, jsonify, send_from_directory
-from generate_assessment import process_assessment
+import pandas as pd
+import requests
+from market_lookup import suggest_hw_replacements, suggest_sw_replacements
+from visualization import generate_visual_charts
+from report_docx import generate_docx_report
+from drive_utils import upload_file_to_drive
+from report_pptx import generate_pptx_report
 
-app = Flask(__name__)
+TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
 
-@app.route("/start_assessment", methods=["POST"])
-def start_assessment():
-    try:
-        data = request.get_json(force=True)
-        print("\n📥 Received trigger to start assessment")
-        print(json.dumps(data, indent=2), flush=True)
+def generate_assessment(session_id, email, goal, files, next_action_webhook=""):
+    session_path = os.path.join("temp_sessions", session_id)
+    os.makedirs(session_path, exist_ok=True)
 
-        session_id = data.get("session_id")
-        email = data.get("email")
-        goal = data.get("goal")
-        files = data.get("files", [])
-        next_action_webhook = data.get("next_action_webhook")
+    hw_df = sw_df = None
+    hw_file_path = sw_file_path = ""
 
-        if not session_id or not email or not goal:
-            return jsonify({"error": "Missing required fields."}), 400
+    hw_template_path = os.path.join(TEMPLATES_DIR, "HWGapAnalysis.xlsx")
+    sw_template_path = os.path.join(TEMPLATES_DIR, "SWGapAnalysis.xlsx")
+    hw_base_df = pd.read_excel(hw_template_path)
+    sw_base_df = pd.read_excel(sw_template_path)
 
-        print(f"➡️ Calling process_assessment for session: {session_id}", flush=True)
-        result = process_assessment(data)
-        print("✅ Assessment completed. Returning result.\n", flush=True)
-        return jsonify({"status": "assessment_done", "result": result}), 200
+    classification_df = pd.read_excel(
+        os.path.join(TEMPLATES_DIR, "ClassificationTier.xlsx")
+    )
 
-    except Exception as e:
-        print("❌ Error in /start_assessment:", str(e), flush=True)
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+    for file in files:
+        ftype = file['type'].lower()
+        file_url = file['file_url']
+        file_name = file['file_name']
+        local_path = os.path.join(session_path, file_name)
 
+        if file_url.startswith(("http://", "https://")):
+            response = requests.get(file_url)
+            response.raise_for_status()
+            with open(local_path, "wb") as f:
+                f.write(response.content)
+        else:
+            with open(file_url, "rb") as src, open(local_path, "wb") as dst:
+                dst.write(src.read())
 
-@app.route("/files/<path:filename>", methods=["GET"])
-def serve_file(filename):
-    """Serve generated files from the ``temp_sessions`` folder."""
-    return send_from_directory("temp_sessions", filename, as_attachment=True)
+        if "hardware" in ftype or "hw" in file_name.lower():
+            hw_file_path = local_path
+        elif "software" in ftype or "sw" in file_name.lower():
+            sw_file_path = local_path
 
-@app.route("/", methods=["GET"])
-def index():
-    return "IT Assessment API Running", 200
+    def merge_with_template(template_df, inventory_df):
+        for col in inventory_df.columns:
+            if col not in template_df.columns:
+                template_df[col] = None
+        inventory_df = inventory_df.reindex(columns=template_df.columns, fill_value=None)
+        return pd.concat([template_df, inventory_df], ignore_index=True)
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    def apply_classification(df):
+        if df is not None and not df.empty and "Tier Total Score" in df.columns:
+            return df.merge(classification_df, how="left", left_on="Tier Total Score", right_on="Score")
+        return df
