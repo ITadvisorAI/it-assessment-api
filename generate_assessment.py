@@ -9,29 +9,18 @@ from report_pptx import generate_pptx_report
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
 
-"""Utilities to generate an IT assessment report.
-
-The :func:`generate_assessment` function downloads the provided Excel files
-into a per-session directory. If the ``file_url`` field of an entry starts with
-``http://`` or ``https://`` the file is fetched using :func:`requests.get`.
-Otherwise ``file_url`` is treated as a local path and the file is copied
-directly. The downloaded files are then processed to produce reports and charts.
-"""
-
-def generate_assessment(session_id, email, goal, files):
+def generate_assessment(session_id, email, goal, files, next_action_webhook=""):
     session_path = os.path.join("temp_sessions", session_id)
     os.makedirs(session_path, exist_ok=True)
 
     hw_df = sw_df = None
     hw_file_path = sw_file_path = ""
 
-    # Load template spreadsheets as base DataFrames
     hw_template_path = os.path.join(TEMPLATES_DIR, "HWGapAnalysis.xlsx")
     sw_template_path = os.path.join(TEMPLATES_DIR, "SWGapAnalysis.xlsx")
     hw_base_df = pd.read_excel(hw_template_path)
     sw_base_df = pd.read_excel(sw_template_path)
 
-    # Classification lookup table
     classification_df = pd.read_excel(
         os.path.join(TEMPLATES_DIR, "ClassificationTier.xlsx")
     )
@@ -42,7 +31,6 @@ def generate_assessment(session_id, email, goal, files):
         file_name = file['file_name']
         local_path = os.path.join(session_path, file_name)
 
-        # Download remote files or copy local ones
         if file_url.startswith(("http://", "https://")):
             response = requests.get(file_url)
             response.raise_for_status()
@@ -58,7 +46,6 @@ def generate_assessment(session_id, email, goal, files):
             sw_file_path = local_path
 
     def merge_with_template(template_df, inventory_df):
-        """Ensure inventory columns match template layout and append."""
         for col in inventory_df.columns:
             if col not in template_df.columns:
                 template_df[col] = None
@@ -86,7 +73,6 @@ def generate_assessment(session_id, email, goal, files):
     docx_path = generate_docx_report(session_id, hw_df, sw_df, chart_paths)
     pptx_path = generate_pptx_report(session_id, hw_df, sw_df, chart_paths)
 
-    # Save Excel gap files
     hw_gap_path = sw_gap_path = None
     if hw_df is not None:
         hw_gap_path = os.path.join(session_path, f"HWGapAnalysis_{session_id}.xlsx")
@@ -106,7 +92,6 @@ def generate_assessment(session_id, email, goal, files):
     if pptx_path:
         drive_links["file_4_drive_url"] = upload_file_to_drive(pptx_path, os.path.basename(pptx_path), folder_id)
 
-    # Return result payload
     payload = {
         "session_id": session_id,
         "gpt_module": "it_assessment",
@@ -123,6 +108,15 @@ def generate_assessment(session_id, email, goal, files):
     }
     payload.update(drive_links)
 
+    if next_action_webhook:
+        try:
+            response = requests.post(next_action_webhook, json=payload)
+            print(f"📤 Sent results to next module. Status: {response.status_code}")
+        except Exception as e:
+            print(f"❌ Failed to notify next GPT module: {e}")
+    else:
+        print("⚠️ No next_action_webhook provided. Skipping downstream trigger.", flush=True)
+
     return payload
 
 
@@ -131,6 +125,7 @@ def process_assessment(data):
     email = data.get("email")
     goal = data.get("goal", "project plan")
     files = data.get("files", [])
+    next_action_webhook = data.get("next_action_webhook", "")
 
     print("[DEBUG] Entered process_assessment()", flush=True)
-    return generate_assessment(session_id, email, goal, files)
+    return generate_assessment(session_id, email, goal, files, next_action_webhook)
