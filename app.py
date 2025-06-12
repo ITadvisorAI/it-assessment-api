@@ -1,10 +1,17 @@
 import os
 import json
 import traceback
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from generate_assessment import process_assessment
 
 app = Flask(__name__)
+
+
+@app.route('/files/<session_id>/<path:filename>')
+def serve_generated_file(session_id, filename):
+    """Serve generated files from the temp_sessions directory."""
+    directory = os.path.join('temp_sessions', session_id)
+    return send_from_directory(directory, filename)
 
 @app.route("/start_assessment", methods=["POST"])
 def start_assessment():
@@ -31,7 +38,7 @@ def start_assessment():
             "next_action_webhook": next_action_webhook
         })
         print("✅ Assessment completed. Returning result.\n", flush=True)
-        return jsonify(result), 200
+        return jsonify({"result": result}), 200
 
     except Exception as e:
         traceback.print_exc()
