@@ -6,7 +6,6 @@ from generate_assessment import process_assessment
 
 app = Flask(__name__)
 
-
 @app.route('/files/<session_id>/<path:filename>')
 def serve_generated_file(session_id, filename):
     """Serve generated files from the temp_sessions directory."""
@@ -25,6 +24,7 @@ def start_assessment():
         goal = data.get("goal")
         files = data.get("files", [])
         next_action_webhook = data.get("next_action_webhook", "")
+        folder_id = data.get("folder_id")  # <— New extraction
 
         if not session_id or not email or not goal:
             return jsonify({"error": "Missing required fields: session_id, email, or goal"}), 400
@@ -35,7 +35,8 @@ def start_assessment():
             "email": email,
             "goal": goal,
             "files": files,
-            "next_action_webhook": next_action_webhook
+            "next_action_webhook": next_action_webhook,
+            "folder_id": folder_id     # <— Pass through
         })
         print("✅ Assessment completed. Returning result.\n", flush=True)
         return jsonify({"result": result}), 200
