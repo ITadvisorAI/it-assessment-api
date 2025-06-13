@@ -1,41 +1,54 @@
-import os
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
+from googleapiclient.discovery import build
+from google.oauth2 import service_account
+import os
 
-SCOPES = ["https://www.googleapis.com/auth/drive.file"]
-CREDENTIALS_FILE = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "service_account.json")
+SERVICE_ACCOUNT_FILE = "/etc/secrets/service_account.json"
+creds = service_account.Credentials.from_service_account_file(
+    SERVICE_ACCOUNT_FILE,
+    scopes=["https://www.googleapis.com/auth/drive"]
+)
+drive_service = build('drive', 'v3', credentials=creds)
 
+def upload_to_drive(file_path, file_name, session_folder_name):
+    try:
+        # Step 1: Locate the session folder by name
+        folder_query = f"name='{session_folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed = false"
+        folders = drive_service.files().list(q=folder_query, fields="files(id)").execute().get("files", [])
 
-def get_drive_service():
-    """Build and return a Google Drive service instance."""
-    creds = service_account.Credentials.from_service_account_file(
-        CREDENTIALS_FILE, scopes=SCOPES
-    )
-    return build("drive", "v3", credentials=creds)
+        if not folders:
+            raise Exception(f"No Google Drive folder found for session: {session_folder_name}")
 
+        folder_id = folders[0]['id']
 
-def upload_file_to_drive(path, file_name=None, folder_id=None):
-    """Upload a file to Google Drive and return a shareable link."""
-    service = get_drive_service()
+        # Step 2: Prepare media for upload
+        mime_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document" if file_name.endswith(".docx") else \
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if file_name.endswith(".xlsx") else \
+                    "application/vnd.openxmlformats-officedocument.presentationml.presentation" if file_name.endswith(".pptx") else \
+                    "application/octet-stream"
 
-    metadata = {"name": file_name or os.path.basename(path)}
-    if folder_id:
-        metadata["parents"] = [folder_id]
+        media = MediaFileUpload(file_path, mimetype=mime_type)
 
-    media = MediaFileUpload(path, resumable=False)
-    file = (
-        service.files()
-        .create(body=metadata, media_body=media, fields="id")
-        .execute()
-    )
-    file_id = file.get("id")
+        # Step 3: Upload the file
+        uploaded = drive_service.files().create(
+            body={
+                "name": file_name,
+                "parents": [folder_id]
+            },
+            media_body=media,
+            fields="id, webViewLink"
+        ).execute()
 
-    service.permissions().create(
-        fileId=file_id, body={"role": "reader", "type": "anyone"}
-    ).execute()
+        # Step 4: Make uploaded file publicly viewable
+        drive_service.permissions().create(
+            fileId=uploaded['id'],
+            body={"type": "anyone", "role": "reader"},
+            fields="id"
+        ).execute()
 
-    link = (
-        service.files().get(fileId=file_id, fields="webViewLink").execute().get("webViewLink")
-    )
-    return link
+        print(f"[UPLOAD] File uploaded to Google Drive: {uploaded['webViewLink']}")
+        return uploaded["webViewLink"]
+
+    except Exception as e:
+        print(f"[ERROR] Failed to upload to Drive: {e}")
+        raise
