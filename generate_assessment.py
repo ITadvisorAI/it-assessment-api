@@ -9,115 +9,103 @@ from report_pptx import generate_pptx_report
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
 
-def generate_assessment(session_id, email, goal, files, next_action_webhook=""):
+def generate_assessment(
+    session_id,
+    email,
+    goal,
+    files,
+    next_action_webhook="",
+    folder_id=None  # <— Accept folder_id
+):
     session_path = os.path.join("temp_sessions", session_id)
     os.makedirs(session_path, exist_ok=True)
 
-    hw_df = sw_df = None
-    hw_file_path = sw_file_path = ""
+    # Load templates
+    hw_base_df = pd.read_excel(os.path.join(TEMPLATES_DIR, "HWGapAnalysis.xlsx"))
+    sw_base_df = pd.read_excel(os.path.join(TEMPLATES_DIR, "SWGapAnalysis.xlsx"))
+    classification_df = pd.read_excel(os.path.join(TEMPLATES_DIR, "ClassificationTier.xlsx"))
 
-    hw_template_path = os.path.join(TEMPLATES_DIR, "HWGapAnalysis.xlsx")
-    sw_template_path = os.path.join(TEMPLATES_DIR, "SWGapAnalysis.xlsx")
-    hw_base_df = pd.read_excel(hw_template_path)
-    sw_base_df = pd.read_excel(sw_template_path)
+    hw_file_path = sw_file_path = None
 
-    classification_df = pd.read_excel(
-        os.path.join(TEMPLATES_DIR, "ClassificationTier.xlsx")
-    )
-
+    # Download user files
     for file in files:
-        ftype = file['type'].lower()
-        file_url = file['file_url']
-        file_name = file['file_name']
-        local_path = os.path.join(session_path, file_name)
+        url = file["file_url"]
+        name = file["file_name"]
+        local = os.path.join(session_path, name)
+        resp = requests.get(url) if url.startswith("http") else open(url, "rb")
+        with open(local, "wb") as f:
+            f.write(resp.content if hasattr(resp, "content") else resp.read())
+        if "asset_inventory" in file["type"]:
+            hw_file_path = local if "hardware" in name.lower() else hw_file_path
+            sw_file_path = local if "application" in name.lower() else sw_file_path
 
-        if file_url.startswith(("http://", "https://")):
-            response = requests.get(file_url)
-            response.raise_for_status()
-            with open(local_path, "wb") as f:
-                f.write(response.content)
-        else:
-            with open(file_url, "rb") as src, open(local_path, "wb") as dst:
-                dst.write(src.read())
-
-        if "hardware" in ftype or "hw" in file_name.lower():
-            hw_file_path = local_path
-        elif "software" in ftype or "sw" in file_name.lower():
-            sw_file_path = local_path
-
-    def merge_with_template(template_df, inventory_df):
-        for col in inventory_df.columns:
-            if col not in template_df.columns:
-                template_df[col] = None
-        inventory_df = inventory_df.reindex(columns=template_df.columns, fill_value=None)
-        return pd.concat([template_df, inventory_df], ignore_index=True)
+    # Merge and classify
+    def merge_with_template(tdf, inv_df):
+        for c in inv_df.columns:
+            if c not in tdf.columns:
+                tdf[c] = None
+        inv_df = inv_df.reindex(columns=tdf.columns, fill_value=None)
+        return pd.concat([tdf, inv_df], ignore_index=True)
 
     def apply_classification(df):
-        if df is not None and not df.empty and "Tier Total Score" in df.columns:
+        if df is not None and "Tier Total Score" in df.columns:
             return df.merge(classification_df, how="left", left_on="Tier Total Score", right_on="Score")
         return df
+
+    hw_df = sw_df = None
     if hw_file_path:
-        hw_inventory = pd.read_excel(hw_file_path)
-        hw_df = merge_with_template(hw_base_df, hw_inventory)
-        hw_df = suggest_hw_replacements(hw_df)
-        hw_df = apply_classification(hw_df)
-
+        inv = pd.read_excel(hw_file_path)
+        hw_df = apply_classification(suggest_hw_replacements(merge_with_template(hw_base_df, inv)))
     if sw_file_path:
-        sw_inventory = pd.read_excel(sw_file_path)
-        sw_df = merge_with_template(sw_base_df, sw_inventory)
-        sw_df = suggest_sw_replacements(sw_df)
-        sw_df = apply_classification(sw_df)
+        inv = pd.read_excel(sw_file_path)
+        sw_df = apply_classification(suggest_sw_replacements(merge_with_template(sw_base_df, inv)))
 
-    chart_paths = generate_visual_charts(hw_df, sw_df, session_id)
-    docx_path = generate_docx_report(session_id, hw_df, sw_df, chart_paths)
-    pptx_path = generate_pptx_report(session_id, hw_df, sw_df, chart_paths)
+    # Generate visuals and reports
+    charts = generate_visual_charts(hw_df, sw_df, session_id)
+    docx_path = generate_docx_report(session_id, hw_df, sw_df, charts)
+    pptx_path = generate_pptx_report(session_id, hw_df, sw_df, charts)
 
-    hw_gap_path = sw_gap_path = None
+    # Save gap analysis sheets
     if hw_df is not None:
-        hw_gap_path = os.path.join(session_path, f"HWGapAnalysis_{session_id}.xlsx")
-        hw_df.to_excel(hw_gap_path, index=False)
+        hw_df.to_excel(os.path.join(session_path, f"HWGapAnalysis_{session_id}.xlsx"), index=False)
     if sw_df is not None:
-        sw_gap_path = os.path.join(session_path, f"SWGapAnalysis_{session_id}.xlsx")
-        sw_df.to_excel(sw_gap_path, index=False)
+        sw_df.to_excel(os.path.join(session_path, f"SWGapAnalysis_{session_id}.xlsx"), index=False)
 
-    folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
-    drive_links = {}
-    if hw_gap_path:
-        drive_links["file_1_drive_url"] = upload_to_drive(hw_gap_path, os.path.basename(hw_gap_path), folder_id)
-    if sw_gap_path:
-        drive_links["file_2_drive_url"] = upload_to_drive(sw_gap_path, os.path.basename(sw_gap_path), folder_id)
-    if docx_path:
-        drive_links["file_3_drive_url"] = upload_to_drive(docx_path, os.path.basename(docx_path), folder_id)
-    if pptx_path:
-        drive_links["file_4_drive_url"] = upload_to_drive(pptx_path, os.path.basename(pptx_path), folder_id)
+    # Determine drive folder
+    if not folder_id:
+        folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
 
+    # Upload to Drive
+    links = {}
+    for idx, path in enumerate([
+        f"HWGapAnalysis_{session_id}.xlsx",
+        f"SWGapAnalysis_{session_id}.xlsx",
+        os.path.basename(docx_path),
+        os.path.basename(pptx_path)
+    ], start=1):
+        full = os.path.join(session_path, path)
+        if os.path.exists(full):
+            links[f"file_{idx}_drive_url"] = upload_to_drive(full, path, folder_id)
+
+    # Build payload for downstream
     payload = {
         "session_id": session_id,
         "gpt_module": "it_assessment",
         "status": "complete",
-        "message": "Assessment completed",
-        "file_1_name": f"HWGapAnalysis_{session_id}.xlsx",
-        "file_1_url": f"/files/{session_id}/HWGapAnalysis_{session_id}.xlsx",
-        "file_2_name": f"SWGapAnalysis_{session_id}.xlsx",
-        "file_2_url": f"/files/{session_id}/SWGapAnalysis_{session_id}.xlsx",
-        "file_3_name": "IT_Current_Status_Assessment_Report.docx",
-        "file_3_url": f"/files/{session_id}/IT_Current_Status_Assessment_Report.docx",
-        "file_4_name": "IT_Current_Status_Executive_Report.pptx",
-        "file_4_url": f"/files/{session_id}/IT_Current_Status_Executive_Report.pptx"
+        **links
     }
-    payload.update(drive_links)
 
+    # Notify next module if webhook provided
     if next_action_webhook:
         try:
-            response = requests.post(next_action_webhook, json=payload)
-            print(f"📤 Sent results to next module. Status: {response.status_code}")
+            r = requests.post(next_action_webhook, json=payload)
+            print(f"📤 Sent results downstream: {r.status_code}")
         except Exception as e:
-            print(f"❌ Failed to notify next GPT module: {e}")
+            print(f"❌ Downstream notify failed: {e}", flush=True)
     else:
-        print("⚠️ No next_action_webhook provided. Skipping downstream trigger.", flush=True)
+        print("⚠️ No next_action_webhook; skipping downstream call.", flush=True)
 
     return payload
-
 
 def process_assessment(data):
     session_id = data.get("session_id")
@@ -125,6 +113,7 @@ def process_assessment(data):
     goal = data.get("goal", "project plan")
     files = data.get("files", [])
     next_action_webhook = data.get("next_action_webhook", "")
+    folder_id = data.get("folder_id")  # <— Extract folder_id
 
     print("[DEBUG] Entered process_assessment()", flush=True)
-    return generate_assessment(session_id, email, goal, files, next_action_webhook)
+    return generate_assessment(session_id, email, goal, files, next_action_webhook, folder_id)
