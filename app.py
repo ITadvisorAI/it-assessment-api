@@ -24,7 +24,7 @@ def start_assessment():
         goal = data.get("goal")
         files = data.get("files", [])
         next_action_webhook = data.get("next_action_webhook", "")
-        folder_id = data.get("folder_id")  # <— New extraction
+        folder_id = data.get("folder_id")  # passed from proxy
 
         if not session_id or not email or not goal:
             return jsonify({"error": "Missing required fields: session_id, email, or goal"}), 400
@@ -36,7 +36,7 @@ def start_assessment():
             "goal": goal,
             "files": files,
             "next_action_webhook": next_action_webhook,
-            "folder_id": folder_id     # <— Pass through
+            "folder_id": folder_id
         })
         print("✅ Assessment completed. Returning result.\n", flush=True)
         return jsonify({"result": result}), 200
@@ -46,4 +46,7 @@ def start_assessment():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=5001)
+    # Bind to the Render-assigned port
+    port = int(os.environ.get("PORT", 5001))
+    print(f"[INFO] Starting server on port {port}")
+    app.run(debug=False, host="0.0.0.0", port=port)
