@@ -1,4 +1,4 @@
-import os
+import os 
 import pandas as pd
 import requests
 from market_lookup import suggest_hw_replacements, suggest_sw_replacements
@@ -36,11 +36,23 @@ def generate_assessment(
     session_path = os.path.join("temp_sessions", session_id)
     os.makedirs(session_path, exist_ok=True)
 
-    # … (download & classify input files, merge/classify, charting) …
+    # … (download & classify input files, merge/classify, assume hw_df & sw_df defined) …
 
+    # Charting
     print("[DEBUG] Generating charts...", flush=True)
     chart_paths = generate_visual_charts(hw_df, sw_df, session_id)
     print(f"[DEBUG] Charts: {chart_paths}", flush=True)
+
+    # ─── Upload each chart image to Drive and replace its local path with the Drive URL ───
+    for chart_name, local_path in list(chart_paths.items()):
+        try:
+            print(f"[DEBUG] Uploading chart {local_path} to Drive", flush=True)
+            drive_url = upload_to_drive(local_path, os.path.basename(local_path), folder_id)
+            chart_paths[chart_name] = drive_url
+            print(f"[DEBUG] Chart {chart_name} uploaded: {drive_url}", flush=True)
+        except Exception as ex:
+            print(f"❌ Failed to upload chart {local_path}: {ex}", flush=True)
+            # leave the original local path if upload fails
 
     # Save gap-analysis sheets
     hw_gap = sw_gap = None
@@ -70,10 +82,9 @@ def generate_assessment(
             print(f"[DEBUG] Uploaded to: {url}", flush=True)
 
     # ──────────────────────────────────────────────
-    # NEW: offload DOCX/PPTX creation to the external service
+    # Offload DOCX/PPTX creation to the external service
     payload = {
         "session_id": session_id,
-        # pass any URLs or data your generator needs:
         "hw_gap_url": links.get("file_1_drive_url"),
         "sw_gap_url": links.get("file_2_drive_url"),
         "chart_paths": chart_paths
