@@ -16,14 +16,13 @@ CLASSIFICATION_DF = pd.read_excel(os.path.join(TEMPLATES_DIR, "ClassificationTie
 print("[DEBUG] Templates cached successfully", flush=True)
 # ──────────────────────────────────────────────
 
-# Where to send doc/PPT generation requests
+# New: where to send doc/PPT generation requests
 DOCX_SERVICE_URL = os.getenv(
     "DOCX_SERVICE_URL",
     "https://docx-generator-api.onrender.com"
 )
 
 def build_score_summary(hw_df, sw_df):
-    # Simple example summary—customize as needed
     hw_count = len(hw_df) if hw_df is not None else 0
     sw_count = len(sw_df) if sw_df is not None else 0
     return (
@@ -32,26 +31,24 @@ def build_score_summary(hw_df, sw_df):
     )
 
 def build_recommendations(hw_df, sw_df):
-    # Placeholder recommendations logic
     recs = []
-    if hw_df is not None and hw_df.empty:
+    if hw_df is None or hw_df.empty:
         recs.append("No hardware data provided.")
     else:
         recs.append("Review hardware tiers for under-resourced assets.")
-    if sw_df is not None and sw_df.empty:
+    if sw_df is None or sw_df.empty:
         recs.append("No software data provided.")
     else:
         recs.append("Ensure all applications are classified by criticality.")
     return " ".join(recs)
 
 def build_key_findings(hw_df, sw_df):
-    # Placeholder key findings logic
     findings = []
-    if hw_df is not None:
-        max_score = hw_df["Tier Total Score"].max() if "Tier Total Score" in hw_df.columns else None
+    if hw_df is not None and "Tier Total Score" in hw_df.columns:
+        max_score = hw_df["Tier Total Score"].max()
         findings.append(f"Maximum hardware tier score: {max_score}.")
-    if sw_df is not None:
-        avg_score = sw_df["Tier Total Score"].mean() if "Tier Total Score" in sw_df.columns else None
+    if sw_df is not None and "Tier Total Score" in sw_df.columns:
+        avg_score = sw_df["Tier Total Score"].mean()
         findings.append(f"Average software tier score: {avg_score:.1f}.")
     return " ".join(findings)
 
@@ -67,14 +64,64 @@ def generate_assessment(
     session_path = os.path.join("temp_sessions", session_id)
     os.makedirs(session_path, exist_ok=True)
 
-    # … (download & classify input files, merge/classify, assume hw_df & sw_df defined) …
+    # Download & classify input files
+    hw_file_path = sw_file_path = None
+    for file in files:
+        url = file["file_url"]
+        name = file["file_name"]
+        local = os.path.join(session_path, name)
+        print(f"[DEBUG] Downloading file {name} from {url}", flush=True)
+        if url.startswith("http"):
+            resp = requests.get(url); resp.raise_for_status()
+            with open(local, "wb") as f:
+                f.write(resp.content)
+        else:
+            with open(url, "rb") as src, open(local, "wb") as dst:
+                dst.write(src.read())
+        print(f"[DEBUG] Saved to {local}", flush=True)
+        if file["type"] == "asset_inventory":
+            if hw_file_path is None:
+                hw_file_path = local
+            else:
+                sw_file_path = local
+
+    print(f"[DEBUG] hw_file_path={hw_file_path}, sw_file_path={sw_file_path}", flush=True)
+
+    # Helpers
+    def merge_with_template(tdf, inv_df):
+        for c in inv_df.columns:
+            if c not in tdf.columns:
+                tdf[c] = None
+        inv_df = inv_df.reindex(columns=tdf.columns, fill_value=None)
+        return pd.concat([tdf, inv_df], ignore_index=True)
+
+    def apply_classification(df):
+        if df is not None and "Tier Total Score" in df.columns:
+            return df.merge(CLASSIFICATION_DF, how="left",
+                            left_on="Tier Total Score", right_on="Score")
+        return df
+
+    # Merge & classify
+    print("[DEBUG] Merging and classifying data...", flush=True)
+    hw_df = sw_df = None
+    if hw_file_path:
+        inv = pd.read_excel(hw_file_path)
+        hw_df = merge_with_template(HW_BASE_DF.copy(), inv)
+        hw_df = suggest_hw_replacements(hw_df)
+        hw_df = apply_classification(hw_df)
+    if sw_file_path:
+        inv = pd.read_excel(sw_file_path)
+        sw_df = merge_with_template(SW_BASE_DF.copy(), inv)
+        sw_df = suggest_sw_replacements(sw_df)
+        sw_df = apply_classification(sw_df)
+    print("[DEBUG] Merge/classify done", flush=True)
 
     # Charting
     print("[DEBUG] Generating charts...", flush=True)
     chart_paths = generate_visual_charts(hw_df, sw_df, session_id)
     print(f"[DEBUG] Charts: {chart_paths}", flush=True)
 
-    # Upload each chart image to Drive and replace its local path with the Drive URL
+    # Upload each chart image to Drive
     for chart_name, local_path in list(chart_paths.items()):
         try:
             print(f"[DEBUG] Uploading chart {local_path} to Drive", flush=True)
@@ -83,7 +130,6 @@ def generate_assessment(
             print(f"[DEBUG] Chart {chart_name} uploaded: {drive_url}", flush=True)
         except Exception as ex:
             print(f"❌ Failed to upload chart {local_path}: {ex}", flush=True)
-            # leave local path if upload fails
 
     # Save gap-analysis sheets
     hw_gap = sw_gap = None
@@ -103,7 +149,7 @@ def generate_assessment(
     else:
         print(f"[DEBUG] Using provided folder_id: {folder_id}", flush=True)
 
-    # Upload intermediate artifacts to Drive
+    # Upload gap-analysis sheets
     links = {}
     for idx, path in enumerate([hw_gap, sw_gap], start=1):
         if path and os.path.exists(path):
@@ -112,12 +158,12 @@ def generate_assessment(
             links[f"file_{idx}_drive_url"] = url
             print(f"[DEBUG] Uploaded to: {url}", flush=True)
 
-    # Build narrative content for the report
+    # Build narrative content
     score_summary   = build_score_summary(hw_df, sw_df)
     recommendations = build_recommendations(hw_df, sw_df)
     key_findings    = build_key_findings(hw_df, sw_df)
 
-    # Offload DOCX/PPTX creation to the external service
+    # Offload DOCX/PPTX creation
     payload = {
         "session_id":      session_id,
         "hw_gap_url":      links.get("file_1_drive_url"),
@@ -133,11 +179,11 @@ def generate_assessment(
     gen = resp.json()
     print(f"[DEBUG] Report-Generator response: {gen}", flush=True)
 
-    # incorporate back the served URLs
+    # Incorporate back the served URLs
     links["file_3_drive_url"] = gen["docx_url"]
     links["file_4_drive_url"] = gen["pptx_url"]
 
-    # Build payload for downstream modules
+    # Build result payload
     result = {
         "session_id": session_id,
         "gpt_module": "it_assessment",
