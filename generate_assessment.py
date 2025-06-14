@@ -16,7 +16,6 @@ CLASSIFICATION_DF = pd.read_excel(os.path.join(TEMPLATES_DIR, "ClassificationTie
 print("[DEBUG] Templates cached successfully", flush=True)
 # ──────────────────────────────────────────────
 
-# New: where to send doc/PPT generation requests
 DOCX_SERVICE_URL = os.getenv(
     "DOCX_SERVICE_URL",
     "https://docx-generator-api.onrender.com"
@@ -87,7 +86,6 @@ def generate_assessment(
 
     print(f"[DEBUG] hw_file_path={hw_file_path}, sw_file_path={sw_file_path}", flush=True)
 
-    # Helpers
     def merge_with_template(tdf, inv_df):
         for c in inv_df.columns:
             if c not in tdf.columns:
@@ -101,7 +99,6 @@ def generate_assessment(
                             left_on="Tier Total Score", right_on="Score")
         return df
 
-    # Merge & classify
     print("[DEBUG] Merging and classifying data...", flush=True)
     hw_df = sw_df = None
     if hw_file_path:
@@ -121,11 +118,15 @@ def generate_assessment(
     chart_paths = generate_visual_charts(hw_df, sw_df, session_id)
     print(f"[DEBUG] Charts: {chart_paths}", flush=True)
 
-    # Upload each chart image to Drive
+    # ─── Upload each chart image using the session folder name, not ID ───
     for chart_name, local_path in list(chart_paths.items()):
         try:
             print(f"[DEBUG] Uploading chart {local_path} to Drive", flush=True)
-            drive_url = upload_to_drive(local_path, os.path.basename(local_path), folder_id)
+            drive_url = upload_to_drive(
+                local_path,
+                os.path.basename(local_path),
+                session_id
+            )
             chart_paths[chart_name] = drive_url
             print(f"[DEBUG] Chart {chart_name} uploaded: {drive_url}", flush=True)
         except Exception as ex:
@@ -142,19 +143,23 @@ def generate_assessment(
         sw_df.to_excel(sw_gap, index=False)
         print(f"[DEBUG] Saved SW gap sheet: {sw_gap}", flush=True)
 
-    # Determine Drive folder
+    # Determine Drive folder for gap sheets
     if not folder_id:
         folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
         print(f"[DEBUG] Fallback folder_id: {folder_id}", flush=True)
     else:
         print(f"[DEBUG] Using provided folder_id: {folder_id}", flush=True)
 
-    # Upload gap-analysis sheets
+    # Upload gap-analysis sheets by session folder name
     links = {}
     for idx, path in enumerate([hw_gap, sw_gap], start=1):
         if path and os.path.exists(path):
             print(f"[DEBUG] Uploading {path} → Drive", flush=True)
-            url = upload_to_drive(path, os.path.basename(path), folder_id)
+            url = upload_to_drive(
+                path,
+                os.path.basename(path),
+                session_id
+            )
             links[f"file_{idx}_drive_url"] = url
             print(f"[DEBUG] Uploaded to: {url}", flush=True)
 
@@ -191,7 +196,6 @@ def generate_assessment(
         **links
     }
 
-    # Notify next module if requested
     if next_action_webhook:
         try:
             r = requests.post(next_action_webhook, json=result)
@@ -202,7 +206,6 @@ def generate_assessment(
         print("⚠️ No next_action_webhook; skipping downstream.", flush=True)
 
     return result
-
 
 def process_assessment(data):
     session_id          = data.get("session_id")
