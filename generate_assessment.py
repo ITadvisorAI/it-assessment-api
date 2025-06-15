@@ -132,11 +132,18 @@ def generate_assessment(
     chart_paths = generate_visual_charts(hw_df, sw_df, session_id)
     print(f"[DEBUG] Charts: {chart_paths}", flush=True)
 
+    # ensure folder_id set
+    if not folder_id:
+        folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
+        print(f"[DEBUG] Fallback folder_id: {folder_id}", flush=True)
+    else:
+        print(f"[DEBUG] Using provided folder_id: {folder_id}", flush=True)
+
     for name, local_path in list(chart_paths.items()):
         try:
             dl_url = _to_direct_drive_url(local_path)
             print(f"[DEBUG] Uploading chart {local_path} to Drive", flush=True)
-            drive_url = upload_to_drive(local_path, os.path.basename(local_path), session_id)
+            drive_url = upload_to_drive(local_path, os.path.basename(local_path), folder_id)
             chart_paths[name] = drive_url
             print(f"[DEBUG] Chart {name} uploaded: {drive_url}", flush=True)
         except Exception as ex:
@@ -153,17 +160,11 @@ def generate_assessment(
         sw_df.to_excel(sw_gap, index=False)
         print(f"[DEBUG] Saved SW gap sheet: {sw_gap}", flush=True)
 
-    if not folder_id:
-        folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
-        print(f"[DEBUG] Fallback folder_id: {folder_id}", flush=True)
-    else:
-        print(f"[DEBUG] Using provided folder_id: {folder_id}", flush=True)
-
     links = {}
     for idx, path in enumerate([hw_gap, sw_gap], start=1):
         if path and os.path.exists(path):
-            print(f"[DEBUG] Uploading {path} → Drive", flush=True)
-            url = upload_to_drive(path, os.path.basename(path), session_id)
+            print(f"[DEBUG] Uploading gap sheet {path} → Drive", flush=True)
+            url = upload_to_drive(path, os.path.basename(path), folder_id)
             links[f"file_{idx}_drive_url"] = url
             print(f"[DEBUG] Uploaded to: {url}", flush=True)
 
@@ -192,8 +193,8 @@ def generate_assessment(
     # Download & upload DOCX/PPTX back to Drive
     docx_rel = gen["docx_url"]
     pptx_rel = gen["pptx_url"]
-    docx_url = f"{DOCX_SERVICE_URL}{docx_rel}"
-    pptx_url = f"{DOCX_SERVICE_URL}{pptx_rel}"
+    docx_url = f"{DOCX_SERVICE_URL.rstrip('/')}{docx_rel}"
+    pptx_url = f"{DOCX_SERVICE_URL.rstrip('/')}{pptx_rel}"
 
     docx_name  = os.path.basename(docx_rel)
     pptx_name  = os.path.basename(pptx_rel)
@@ -207,8 +208,8 @@ def generate_assessment(
             f.write(dl.content)
         print(f"[DEBUG] Saved to {local}", flush=True)
 
-    links["file_3_drive_url"] = upload_to_drive(docx_local, docx_name, session_id)
-    links["file_4_drive_url"] = upload_to_drive(pptx_local, pptx_name, session_id)
+    links["file_3_drive_url"] = upload_to_drive(docx_local, docx_name, folder_id)
+    links["file_4_drive_url"] = upload_to_drive(pptx_local, pptx_name, folder_id)
     print(f"[DEBUG] Uploaded DOCX+PPTX to Drive: {links['file_3_drive_url']}, {links['file_4_drive_url']}", flush=True)
     # ──────────────────────────────────────────────
 
