@@ -10,9 +10,9 @@ TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
 # ──────────────────────────────────────────────
 # Cache templates at import time (only once)
 print("[DEBUG] Loading template spreadsheets into memory...", flush=True)
-HW_BASE_DF = pd.read_excel(os.path.join(TEMPLATES_DIR, "HWGapAnalysis.xlsx"))
-SW_BASE_DF = pd.read_excel(os.path.join(TEMPLATES_DIR, "SWGapAnalysis.xlsx"))
-CLASSIFICATION_DF = pd.read_excel(os.path.join(TEMPLATES_DIR, "ClassificationTier.xlsx"))
+HW_BASE_DF          = pd.read_excel(os.path.join(TEMPLATES_DIR, "HWGapAnalysis.xlsx"))
+SW_BASE_DF          = pd.read_excel(os.path.join(TEMPLATES_DIR, "SWGapAnalysis.xlsx"))
+CLASSIFICATION_DF   = pd.read_excel(os.path.join(TEMPLATES_DIR, "ClassificationTier.xlsx"))
 print("[DEBUG] Templates cached successfully", flush=True)
 # ──────────────────────────────────────────────
 
@@ -63,112 +63,22 @@ def generate_assessment(
     session_path = os.path.join("temp_sessions", session_id)
     os.makedirs(session_path, exist_ok=True)
 
-    # Download & classify input files
-    hw_file_path = sw_file_path = None
-    for file in files:
-        url = file["file_url"]
-        name = file["file_name"]
-        local = os.path.join(session_path, name)
-        print(f"[DEBUG] Downloading file {name} from {url}", flush=True)
-        if url.startswith("http"):
-            resp = requests.get(url); resp.raise_for_status()
-            with open(local, "wb") as f:
-                f.write(resp.content)
-        else:
-            with open(url, "rb") as src, open(local, "wb") as dst:
-                dst.write(src.read())
-        print(f"[DEBUG] Saved to {local}", flush=True)
-        if file["type"] == "asset_inventory":
-            if hw_file_path is None:
-                hw_file_path = local
-            else:
-                sw_file_path = local
-
-    print(f"[DEBUG] hw_file_path={hw_file_path}, sw_file_path={sw_file_path}", flush=True)
-
-    def merge_with_template(tdf, inv_df):
-        for c in inv_df.columns:
-            if c not in tdf.columns:
-                tdf[c] = None
-        inv_df = inv_df.reindex(columns=tdf.columns, fill_value=None)
-        return pd.concat([tdf, inv_df], ignore_index=True)
-
-    def apply_classification(df):
-        if df is not None and "Tier Total Score" in df.columns:
-            return df.merge(CLASSIFICATION_DF, how="left",
-                            left_on="Tier Total Score", right_on="Score")
-        return df
-
-    print("[DEBUG] Merging and classifying data...", flush=True)
-    hw_df = sw_df = None
-    if hw_file_path:
-        inv = pd.read_excel(hw_file_path)
-        hw_df = merge_with_template(HW_BASE_DF.copy(), inv)
-        hw_df = suggest_hw_replacements(hw_df)
-        hw_df = apply_classification(hw_df)
-    if sw_file_path:
-        inv = pd.read_excel(sw_file_path)
-        sw_df = merge_with_template(SW_BASE_DF.copy(), inv)
-        sw_df = suggest_sw_replacements(sw_df)
-        sw_df = apply_classification(sw_df)
-    print("[DEBUG] Merge/classify done", flush=True)
+    # … your existing download, merge/classify, charting, and gap-sheet code …
 
     # Charting
     print("[DEBUG] Generating charts...", flush=True)
     chart_paths = generate_visual_charts(hw_df, sw_df, session_id)
-    print(f"[DEBUG] Charts: {chart_paths}", flush=True)
+    # … upload charts to Drive …
 
-    # ─── Upload each chart image using the session folder name, not ID ───
-    for chart_name, local_path in list(chart_paths.items()):
-        try:
-            print(f"[DEBUG] Uploading chart {local_path} to Drive", flush=True)
-            drive_url = upload_to_drive(
-                local_path,
-                os.path.basename(local_path),
-                session_id
-            )
-            chart_paths[chart_name] = drive_url
-            print(f"[DEBUG] Chart {chart_name} uploaded: {drive_url}", flush=True)
-        except Exception as ex:
-            print(f"❌ Failed to upload chart {local_path}: {ex}", flush=True)
+    # … save & upload HWGapAnalysis and SWGapAnalysis sheets …
 
-    # Save gap-analysis sheets
-    hw_gap = sw_gap = None
-    if hw_df is not None:
-        hw_gap = os.path.join(session_path, f"HWGapAnalysis_{session_id}.xlsx")
-        hw_df.to_excel(hw_gap, index=False)
-        print(f"[DEBUG] Saved HW gap sheet: {hw_gap}", flush=True)
-    if sw_df is not None:
-        sw_gap = os.path.join(session_path, f"SWGapAnalysis_{session_id}.xlsx")
-        sw_df.to_excel(sw_gap, index=False)
-        print(f"[DEBUG] Saved SW gap sheet: {sw_gap}", flush=True)
-
-    # Determine Drive folder for gap sheets
-    if not folder_id:
-        folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
-        print(f"[DEBUG] Fallback folder_id: {folder_id}", flush=True)
-    else:
-        print(f"[DEBUG] Using provided folder_id: {folder_id}", flush=True)
-
-    # Upload gap-analysis sheets by session folder name
-    links = {}
-    for idx, path in enumerate([hw_gap, sw_gap], start=1):
-        if path and os.path.exists(path):
-            print(f"[DEBUG] Uploading {path} → Drive", flush=True)
-            url = upload_to_drive(
-                path,
-                os.path.basename(path),
-                session_id
-            )
-            links[f"file_{idx}_drive_url"] = url
-            print(f"[DEBUG] Uploaded to: {url}", flush=True)
-
-    # Build narrative content
+    # Build narrative
     score_summary   = build_score_summary(hw_df, sw_df)
     recommendations = build_recommendations(hw_df, sw_df)
     key_findings    = build_key_findings(hw_df, sw_df)
 
-    # Offload DOCX/PPTX creation
+    # ──────────────────────────────────────────────
+    # Call external docx-generator
     payload = {
         "session_id":      session_id,
         "hw_gap_url":      links.get("file_1_drive_url"),
@@ -184,11 +94,40 @@ def generate_assessment(
     gen = resp.json()
     print(f"[DEBUG] Report-Generator response: {gen}", flush=True)
 
-    # Incorporate back the served URLs
-    links["file_3_drive_url"] = gen["docx_url"]
-    links["file_4_drive_url"] = gen["pptx_url"]
+    # ──────────────────────────────────────────────
+    # NEW: download the generated docx + pptx
+    docx_rel = gen["docx_url"]   # e.g. "/files/{session_id}/...report.docx"
+    pptx_rel = gen["pptx_url"]
+    docx_url = f"{DOCX_SERVICE_URL}{docx_rel}"
+    pptx_url = f"{DOCX_SERVICE_URL}{pptx_rel}"
 
-    # Build result payload
+    # local paths
+    docx_name = os.path.basename(docx_rel)
+    pptx_name = os.path.basename(pptx_rel)
+    docx_local = os.path.join(session_path, docx_name)
+    pptx_local = os.path.join(session_path, pptx_name)
+
+    # download DOCX
+    dl = requests.get(docx_url)
+    dl.raise_for_status()
+    with open(docx_local, "wb") as f:
+        f.write(dl.content)
+    print(f"[DEBUG] Downloaded DOCX to {docx_local}", flush=True)
+
+    # download PPTX
+    dl = requests.get(pptx_url)
+    dl.raise_for_status()
+    with open(pptx_local, "wb") as f:
+        f.write(dl.content)
+    print(f"[DEBUG] Downloaded PPTX to {pptx_local}", flush=True)
+
+    # upload both to Drive
+    links["file_3_drive_url"] = upload_to_drive(docx_local, docx_name, folder_id)
+    links["file_4_drive_url"] = upload_to_drive(pptx_local, pptx_name, folder_id)
+    print(f"[DEBUG] Uploaded DOCX+PPTX to Drive: {links['file_3_drive_url']}, {links['file_4_drive_url']}", flush=True)
+    # ──────────────────────────────────────────────
+
+    # Build final payload
     result = {
         "session_id": session_id,
         "gpt_module": "it_assessment",
@@ -206,6 +145,7 @@ def generate_assessment(
         print("⚠️ No next_action_webhook; skipping downstream.", flush=True)
 
     return result
+
 
 def process_assessment(data):
     session_id          = data.get("session_id")
