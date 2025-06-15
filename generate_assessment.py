@@ -27,6 +27,7 @@ DOCX_SERVICE_URL = os.getenv(
     "https://docx-generator-api.onrender.com"
 )
 
+
 def build_score_summary(hw_df, sw_df):
     hw_count = len(hw_df) if hw_df is not None else 0
     sw_count = len(sw_df) if sw_df is not None else 0
@@ -34,6 +35,7 @@ def build_score_summary(hw_df, sw_df):
         f"Your hardware inventory contains {hw_count} items, "
         f"and your software inventory contains {sw_count} items."
     )
+
 
 def build_recommendations(hw_df, sw_df):
     recs = []
@@ -47,6 +49,7 @@ def build_recommendations(hw_df, sw_df):
         recs.append("Ensure all applications are classified by criticality.")
     return " ".join(recs)
 
+
 def build_key_findings(hw_df, sw_df):
     findings = []
     if hw_df is not None and "Tier Total Score" in hw_df.columns:
@@ -57,13 +60,99 @@ def build_key_findings(hw_df, sw_df):
         findings.append(f"Average software tier score: {avg_score:.1f}.")
     return " ".join(findings)
 
+
+def build_section_2_overview(hw_df, sw_df):
+    return (
+        f"The organization’s IT landscape includes {len(hw_df)} hardware assets "
+        f"and {len(sw_df)} software assets across multiple environments."
+    )
+
+
+def build_section_3_hardware_breakdown(hw_df, sw_df):
+    if "Device Type" in hw_df.columns:
+        counts = hw_df["Device Type"].value_counts().to_dict()
+        return f"Hardware inventory breakdown by type: {counts}."
+    return f"Hardware asset count: {len(hw_df)}."
+
+
+def build_section_4_software_breakdown(hw_df, sw_df):
+    if "Application" in sw_df.columns:
+        counts = sw_df["Application"].value_counts().to_dict()
+        return f"Software inventory breakdown by application: {counts}."
+    return f"Software asset count: {len(sw_df)}."
+
+
+def build_section_5_tier_distribution(hw_df, sw_df):
+    if "Tier" in hw_df.columns:
+        dist = hw_df["Tier"].value_counts().to_dict()
+        return f"Tier distribution for hardware: {dist}."
+    return "Tier distribution data unavailable."
+
+
+def build_section_6_hardware_lifecycle(hw_df, sw_df):
+    if "Lifecycle Status" in hw_df.columns:
+        stats = hw_df["Lifecycle Status"].value_counts().to_dict()
+        return f"Hardware lifecycle statuses: {stats}."
+    return "Lifecycle status data unavailable."
+
+
+def build_section_7_software_licensing(hw_df, sw_df):
+    if "License Status" in sw_df.columns:
+        lic = sw_df["License Status"].value_counts().to_dict()
+        return f"Software licensing status: {lic}."
+    return "Licensing data unavailable."
+
+
+def build_section_8_security_posture(hw_df, sw_df):
+    return "Security posture analysis pending integration."
+
+
+def build_section_9_performance_metrics(hw_df, sw_df):
+    return "Performance metrics analysis pending integration."
+
+
+def build_section_10_reliability(hw_df, sw_df):
+    return "Reliability metrics analysis pending integration."
+
+
+def build_section_11_scalability(hw_df, sw_df):
+    return "Scalability assessment pending integration."
+
+
+def build_section_12_legacy_debt(hw_df, sw_df):
+    return "Legacy systems and technical debt analysis pending integration."
+
+
+def build_section_13_obsolete_platforms(hw_df, sw_df):
+    return "Obsolete platform identification pending integration."
+
+
+def build_section_14_cloud_migration(hw_df, sw_df):
+    return "Cloud migration potential analysis pending integration."
+
+
+def build_section_15_strategic_alignment(hw_df, sw_df):
+    return "Strategic alignment analysis pending integration."
+
+
+def build_section_17_financial_implications(hw_df, sw_df):
+    return "Financial implications analysis pending integration."
+
+
+def build_section_18_sustainability(hw_df, sw_df):
+    return "Environmental impact and sustainability analysis pending integration."
+
+
+def build_section_20_next_steps(hw_df, sw_df):
+    return "Recommended next steps and roadmap pending integration."
+
+
 def _to_direct_drive_url(url: str) -> str:
-    """Convert a Drive view URL to direct-download URL."""
     m = re.search(r"/d/([A-Za-z0-9_-]+)", url)
     if m:
-        fid = m.group(1)
-        return f"https://drive.google.com/uc?export=download&id={fid}"
+        return f"https://drive.google.com/uc?export=download&id={m.group(1)}"
     return url
+
 
 def generate_assessment(
     session_id,
@@ -77,164 +166,138 @@ def generate_assessment(
     session_path = os.path.join(OUTPUT_DIR, session_id)
     os.makedirs(session_path, exist_ok=True)
 
-    # Always start with empty DataFrames to avoid NameError
-    hw_df = pd.DataFrame()
-    sw_df = pd.DataFrame()
-
-    # ─── Download & classify input files ───
+    hw_df, sw_df = pd.DataFrame(), pd.DataFrame()
     hw_file_path = sw_file_path = None
     for file in files:
-        url = file["file_url"]
-        name = file["file_name"]
+        url, name = file["file_url"], file["file_name"]
         local = os.path.join(session_path, name)
         print(f"[DEBUG] Downloading file {name} from {url}", flush=True)
         if url.startswith("http"):
-            resp = requests.get(url); resp.raise_for_status()
-            with open(local, "wb") as f:
-                f.write(resp.content)
+            resp = requests.get(_to_direct_drive_url(url)); resp.raise_for_status()
+            with open(local, "wb") as f: f.write(resp.content)
         else:
-            with open(url, "rb") as src, open(local, "wb") as dst:
-                dst.write(src.read())
+            with open(url, "rb") as src, open(local, "wb") as dst: dst.write(src.read())
         print(f"[DEBUG] Saved to {local}", flush=True)
         if file["type"] == "asset_inventory":
-            if hw_file_path is None:
-                hw_file_path = local
-            else:
-                sw_file_path = local
+            hw_file_path = hw_file_path or local
+        elif file["type"] == "gap_working":
+            sw_file_path = sw_file_path or local
 
-    print(f"[DEBUG] hw_file_path={hw_file_path}, sw_file_path={sw_file_path}", flush=True)
-
-    def merge_with_template(tdf, inv_df):
-        for c in inv_df.columns:
-            if c not in tdf.columns:
-                tdf[c] = None
-        inv_df = inv_df.reindex(columns=tdf.columns, fill_value=None)
-        return pd.concat([tdf, inv_df], ignore_index=True)
+    # Merge & classify
+    def merge_with_template(df_template, df_inv):
+        for c in df_inv.columns:
+            if c not in df_template.columns:
+                df_template[c] = None
+        df_inv = df_inv.reindex(columns=df_template.columns, fill_value=None)
+        return pd.concat([df_template, df_inv], ignore_index=True)
 
     def apply_classification(df):
-        if df is not None and "Tier Total Score" in df.columns:
-            return df.merge(CLASSIFICATION_DF, how="left",
-                            left_on="Tier Total Score", right_on="Score")
-        return df
+        return df.merge(CLASSIFICATION_DF, how="left", left_on="Tier Total Score", right_on="Score") if not df.empty and "Tier Total Score" in df.columns else df
 
-    print("[DEBUG] Merging and classifying data...", flush=True)
     if hw_file_path:
-        inv = pd.read_excel(hw_file_path)
-        hw_df = merge_with_template(HW_BASE_DF.copy(), inv)
+        hw_df = merge_with_template(HW_BASE_DF.copy(), pd.read_excel(hw_file_path))
         hw_df = suggest_hw_replacements(hw_df)
         hw_df = apply_classification(hw_df)
     if sw_file_path:
-        inv = pd.read_excel(sw_file_path)
-        sw_df = merge_with_template(SW_BASE_DF.copy(), inv)
+        sw_df = merge_with_template(SW_BASE_DF.copy(), pd.read_excel(sw_file_path))
         sw_df = suggest_sw_replacements(sw_df)
         sw_df = apply_classification(sw_df)
-    print("[DEBUG] Merge/classify done", flush=True)
 
-    # ─── Generate and upload charts ───
-    print("[DEBUG] Generating charts...", flush=True)
+    # Charts
     chart_paths = generate_visual_charts(hw_df, sw_df, session_id)
-    print(f"[DEBUG] Charts: {chart_paths}", flush=True)
-
-    # Determine the Drive folder (unused folder_id fallback)
-    if not folder_id:
-        folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
-        print(f"[DEBUG] Fallback folder_id (unused): {folder_id}", flush=True)
-    print(f"[DEBUG] Uploading artifacts into folder named: {session_id}", flush=True)
-
-    # Charts → Drive
     for name, local_path in chart_paths.items():
         try:
-            print(f"[DEBUG] Uploading chart {local_path} to Drive", flush=True)
-            drive_url = upload_to_drive(local_path, os.path.basename(local_path), session_id)
-            chart_paths[name] = drive_url
-            print(f"[DEBUG] Chart {name} uploaded: {drive_url}", flush=True)
+            url = upload_to_drive(local_path, os.path.basename(local_path), session_id)
+            chart_paths[name] = url
         except Exception as ex:
-            print(f"❌ Failed to upload chart {local_path}: {ex}", flush=True)
+            print(f"❌ Failed upload chart {name}: {ex}", flush=True)
 
-    # ─── Save & upload gap-analysis sheets ───
-    hw_gap = sw_gap = None
-    if not hw_df.empty:
-        hw_gap = os.path.join(session_path, f"HWGapAnalysis_{session_id}.xlsx")
-        hw_df.to_excel(hw_gap, index=False)
-        print(f"[DEBUG] Saved HW gap sheet: {hw_gap}", flush=True)
-    if not sw_df.empty:
-        sw_gap = os.path.join(session_path, f"SWGapAnalysis_{session_id}.xlsx")
-        sw_df.to_excel(sw_gap, index=False)
-        print(f"[DEBUG] Saved SW gap sheet: {sw_gap}", flush=True)
-
+    # Save & upload GAP sheets
     links = {}
-    for idx, path in enumerate([hw_gap, sw_gap], start=1):
-        if path and os.path.exists(path):
-            print(f"[DEBUG] Uploading gap sheet {path} → Drive", flush=True)
-            url = upload_to_drive(path, os.path.basename(path), session_id)
-            links[f"file_{idx}_drive_url"] = url
-            print(f"[DEBUG] Uploaded to: {url}", flush=True)
+    for idx, df in enumerate((hw_df, sw_df), start=1):
+        if not df.empty:
+            path = os.path.join(session_path, f"{['HW','SW'][idx-1]}GapAnalysis_{session_id}.xlsx")
+            df.to_excel(path, index=False)
+            links[f"file_{idx}_drive_url"] = upload_to_drive(path, os.path.basename(path), session_id)
 
-    # ──────────────────────────────────────────────
-    # Call external docx-generator
+    # Build narratives
     score_summary   = build_score_summary(hw_df, sw_df)
     recommendations = build_recommendations(hw_df, sw_df)
     key_findings    = build_key_findings(hw_df, sw_df)
 
-    # ==== Expanded payload with all placeholders ====
+    # Section content
+    section_2_overview            = build_section_2_overview(hw_df, sw_df)
+    section_3_hardware_breakdown  = build_section_3_hardware_breakdown(hw_df, sw_df)
+    section_4_software_breakdown  = build_section_4_software_breakdown(hw_df, sw_df)
+    section_5_tier_distribution   = build_section_5_tier_distribution(hw_df, sw_df)
+    section_6_hardware_lifecycle  = build_section_6_hardware_lifecycle(hw_df, sw_df)
+    section_7_software_licensing  = build_section_7_software_licensing(hw_df, sw_df)
+    section_8_security_posture    = build_section_8_security_posture(hw_df, sw_df)
+    section_9_performance_metrics = build_section_9_performance_metrics(hw_df, sw_df)
+    section_10_reliability        = build_section_10_reliability(hw_df, sw_df)
+    section_11_scalability        = build_section_11_scalability(hw_df, sw_df)
+    section_12_legacy_debt        = build_section_12_legacy_debt(hw_df, sw_df)
+    section_13_obsolete_platforms = build_section_13_obsolete_platforms(hw_df, sw_df)
+    section_14_cloud_migration    = build_section_14_cloud_migration(hw_df, sw_df)
+    section_15_strategic_alignment= build_section_15_strategic_alignment(hw_df, sw_df)
+    section_17_financial_implications = build_section_17_financial_implications(hw_df, sw_df)
+    section_18_sustainability    = build_section_18_sustainability(hw_df, sw_df)
+    section_20_next_steps         = build_section_20_next_steps(hw_df, sw_df)
+
+    # Appendices
+    classification_matrix_md = CLASSIFICATION_DF.to_markdown(index=False)
+    data_sources_text        = "Data sources: asset inventory files, GAP templates, classification tiers."
+
+    # Build full payload
     payload = {
-        # Core session info
         "session_id": session_id,
         "email":       email,
         "goal":        goal,
-
-        # GAP URLs & charts
         "hw_gap_url":  links.get("file_1_drive_url"),
         "sw_gap_url":  links.get("file_2_drive_url"),
         "chart_paths": chart_paths,
-
-        # DOCX sections
-        "content_1":  score_summary,
-        "content_2":  score_summary,
-        "content_3":  score_summary,
-        "content_4":  score_summary,
-        "content_5":  score_summary,
-        "content_6":  score_summary,
-        "content_7":  score_summary,
-        "content_8":  score_summary,
-        "content_9":  score_summary,
-        "content_10": score_summary,
-        "content_11": score_summary,
-        "content_12": score_summary,
-        "content_13": score_summary,
-        "content_14": score_summary,
-        "content_15": score_summary,
-        "content_16": key_findings,
-        "content_17": score_summary,
-        "content_18": score_summary,
-        "content_19": recommendations,
-        "content_20": score_summary,
-
-        # Appendices
-        "appendix_classification_matrix": CLASSIFICATION_DF.to_markdown(index=False),
-        "appendix_data_sources":          "Data sources: asset inventory, GAP templates, classification tiers.",
-
-        # PPTX slides
+        "content_1":   score_summary,
+        "content_2":   section_2_overview,
+        "content_3":   section_3_hardware_breakdown,
+        "content_4":   section_4_software_breakdown,
+        "content_5":   section_5_tier_distribution,
+        "content_6":   section_6_hardware_lifecycle,
+        "content_7":   section_7_software_licensing,
+        "content_8":   section_8_security_posture,
+        "content_9":   section_9_performance_metrics,
+        "content_10":  section_10_reliability,
+        "content_11":  section_11_scalability,
+        "content_12":  section_12_legacy_debt,
+        "content_13":  section_13_obsolete_platforms,
+        "content_14":  section_14_cloud_migration,
+        "content_15":  section_15_strategic_alignment,
+        "content_16":  key_findings,
+        "content_17":  section_17_financial_implications,
+        "content_18":  section_18_sustainability,
+        "content_19":  recommendations,
+        "content_20":  section_20_next_steps,
+        "appendix_classification_matrix": classification_matrix_md,
+        "appendix_data_sources":          data_sources_text,
         "slide_executive_summary":           score_summary,
-        "slide_it_landscape_overview":       score_summary,
-        "slide_hardware_analysis":           score_summary,
-        "slide_software_analysis":           score_summary,
-        "slide_tier_classification_summary": score_summary,
-        "slide_hardware_lifecycle_chart":    score_summary,
-        "slide_software_licensing_review":   score_summary,
-        "slide_security_vulnerability_heatmap": score_summary,
-        "slide_performance_&_uptime_trends": score_summary,
-        "slide_system_reliability_overview": score_summary,
-        "slide_scalability_insights":        score_summary,
-        "slide_legacy_system_exposure":      score_summary,
-        "slide_obsolete_platform_matrix":    score_summary,
-        "slide_cloud_migration_targets":     score_summary,
-        "slide_strategic_it_alignment":      score_summary,
+        "slide_it_landscape_overview":       section_2_overview,
+        "slide_hardware_analysis":           section_3_hardware_breakdown,
+        "slide_software_analysis":           section_4_software_breakdown,
+        "slide_tier_classification_summary": section_5_tier_distribution,
+        "slide_hardware_lifecycle_chart":    section_6_hardware_lifecycle,
+        "slide_software_licensing_review":   section_7_software_licensing,
+        "slide_security_vulnerability_heatmap": section_8_security_posture,
+        "slide_performance_&_uptime_trends": section_9_performance_metrics,
+        "slide_system_reliability_overview": section_10_reliability,
+        "slide_scalability_insights":        section_11_scalability,
+        "slide_legacy_system_exposure":      section_12_legacy_debt,
+        "slide_obsolete_platform_matrix":    section_13_obsolete_platforms,
+        "slide_cloud_migration_targets":     section_14_cloud_migration,
+        "slide_strategic_it_alignment":      section_15_strategic_alignment,
         "slide_business_impact_of_gaps":     key_findings,
-        "slide_cost_of_obsolescence":        score_summary,
-        "slide_sustainability_&_green_it":    score_summary,
+        "slide_cost_of_obsolescence":        section_17_financial_implications,
+        "slide_sustainability_&_green_it":    section_18_sustainability,
         "slide_remediation_recommendations":  recommendations,
-        "slide_roadmap_&_next_steps":        score_summary,
+        "slide_roadmap_&_next_steps":        section_20_next_steps,
     }
 
     print(f"[DEBUG] Calling Report-Generator at {DOCX_SERVICE_URL}/generate_assessment", flush=True)
@@ -243,29 +306,18 @@ def generate_assessment(
     gen = resp.json()
     print(f"[DEBUG] Report-Generator response: {gen}", flush=True)
 
-    # ──────────────────────────────────────────────
     # Download & upload DOCX/PPTX back to Drive
-    docx_rel = gen["docx_url"]
-    pptx_rel = gen["pptx_url"]
-    docx_url = f"{DOCX_SERVICE_URL.rstrip('/')}{{docx_rel}}"
-    pptx_url = f"{DOCX_SERVICE_URL.rstrip('/')}{{pptx_rel}}"
-
-    docx_name  = os.path.basename(docx_rel)
-    pptx_name  = os.path.basename(pptx_rel)
+    docx_rel, pptx_rel = gen["docx_url"], gen["pptx_url"]
+    docx_url = f"{DOCX_SERVICE_URL.rstrip('/')}" + docx_rel
+    pptx_url = f"{DOCX_SERVICE_URL.rstrip('/')}" + pptx_rel
+    docx_name, pptx_name = os.path.basename(docx_rel), os.path.basename(pptx_rel)
     docx_local = os.path.join(session_path, docx_name)
     pptx_local = os.path.join(session_path, pptx_name)
-
     for dl_url, local in [(docx_url, docx_local), (pptx_url, pptx_local)]:
-        print(f"[DEBUG] Downloading {dl_url}", flush=True)
         dl = requests.get(dl_url); dl.raise_for_status()
-        with open(local, "wb") as f:
-            f.write(dl.content)
-        print(f"[DEBUG] Saved to {local}", flush=True)
-
+        with open(local, "wb") as f: f.write(dl.content)
     links["file_3_drive_url"] = upload_to_drive(docx_local, docx_name, session_id)
     links["file_4_drive_url"] = upload_to_drive(pptx_local, pptx_name, session_id)
-    print(f"[DEBUG] Uploaded DOCX+PPTX to Drive: "
-          f"{links['file_3_drive_url']}, {links['file_4_drive_url']}", flush=True)
 
     result = {
         "session_id": session_id,
@@ -273,16 +325,12 @@ def generate_assessment(
         "status":     "complete",
         **links
     }
-
     if next_action_webhook:
         try:
             r = requests.post(next_action_webhook, json=result)
             print(f"[DEBUG] Downstream notify status: {r.status_code}", flush=True)
         except Exception as e:
             print(f"❌ Downstream notify failed: {e}", flush=True)
-    else:
-        print("⚠️ No next_action_webhook; skipping downstream.", flush=True)
-
     return result
 
 
