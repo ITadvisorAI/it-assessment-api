@@ -1,4 +1,4 @@
-import os  
+import os
 import re
 import pandas as pd
 import requests
@@ -77,6 +77,10 @@ def generate_assessment(
     session_path = os.path.join(OUTPUT_DIR, session_id)
     os.makedirs(session_path, exist_ok=True)
 
+    # Always start with empty DataFrames to avoid NameError
+    hw_df = pd.DataFrame()
+    sw_df = pd.DataFrame()
+
     # ─── Download & classify input files ───
     hw_file_path = sw_file_path = None
     for file in files:
@@ -114,7 +118,6 @@ def generate_assessment(
         return df
 
     print("[DEBUG] Merging and classifying data...", flush=True)
-    hw_df = sw_df = None
     if hw_file_path:
         inv = pd.read_excel(hw_file_path)
         hw_df = merge_with_template(HW_BASE_DF.copy(), inv)
@@ -132,16 +135,15 @@ def generate_assessment(
     chart_paths = generate_visual_charts(hw_df, sw_df, session_id)
     print(f"[DEBUG] Charts: {chart_paths}", flush=True)
 
-    # ensure folder_id set
+    # Determine the Drive folder (but we upload by session_id, not raw ID)
     if not folder_id:
         folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
-        print(f"[DEBUG] Fallback folder_id: {folder_id}", flush=True)
-    else:
-        print(f"[DEBUG] Using provided folder_id: {folder_id}", flush=True)
+        print(f"[DEBUG] Fallback folder_id (unused): {folder_id}", flush=True)
+    print(f"[DEBUG] Uploading artifacts into folder named: {session_id}", flush=True)
 
-    for name, local_path in list(chart_paths.items()):
+    # Charts → Drive
+    for name, local_path in chart_paths.items():
         try:
-            dl_url = _to_direct_drive_url(local_path)
             print(f"[DEBUG] Uploading chart {local_path} to Drive", flush=True)
             drive_url = upload_to_drive(local_path, os.path.basename(local_path), session_id)
             chart_paths[name] = drive_url
@@ -151,11 +153,11 @@ def generate_assessment(
 
     # ─── Save & upload gap-analysis sheets ───
     hw_gap = sw_gap = None
-    if hw_df is not None:
+    if not hw_df.empty:
         hw_gap = os.path.join(session_path, f"HWGapAnalysis_{session_id}.xlsx")
         hw_df.to_excel(hw_gap, index=False)
         print(f"[DEBUG] Saved HW gap sheet: {hw_gap}", flush=True)
-    if sw_df is not None:
+    if not sw_df.empty:
         sw_gap = os.path.join(session_path, f"SWGapAnalysis_{session_id}.xlsx")
         sw_df.to_excel(sw_gap, index=False)
         print(f"[DEBUG] Saved SW gap sheet: {sw_gap}", flush=True)
@@ -210,7 +212,8 @@ def generate_assessment(
 
     links["file_3_drive_url"] = upload_to_drive(docx_local, docx_name, session_id)
     links["file_4_drive_url"] = upload_to_drive(pptx_local, pptx_name, session_id)
-    print(f"[DEBUG] Uploaded DOCX+PPTX to Drive: {links['file_3_drive_url']}, {links['file_4_drive_url']}", flush=True)
+    print(f"[DEBUG] Uploaded DOCX+PPTX to Drive: "
+          f"{links['file_3_drive_url']}, {links['file_4_drive_url']}", flush=True)
     # ──────────────────────────────────────────────
 
     result = {
