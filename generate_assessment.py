@@ -169,19 +169,26 @@ def generate_assessment(
     hw_df, sw_df = pd.DataFrame(), pd.DataFrame()
     hw_file_path = sw_file_path = None
     for file in files:
-        url, name = file["file_url"], file["file_name"]
+        url, name = file.get("file_url"), file.get("file_name")
         local = os.path.join(session_path, name)
         print(f"[DEBUG] Downloading file {name} from {url}", flush=True)
         if url.startswith("http"):
             resp = requests.get(_to_direct_drive_url(url)); resp.raise_for_status()
-            with open(local, "wb") as f: f.write(resp.content)
+            with open(local, "wb") as f:
+                f.write(resp.content)
         else:
-            with open(url, "rb") as src, open(local, "wb") as dst: dst.write(src.read())
+            with open(url, "rb") as src, open(local, "wb") as dst:
+                dst.write(src.read())
         print(f"[DEBUG] Saved to {local}", flush=True)
-        if file["type"] == "asset_inventory":
-            hw_file_path = hw_file_path or local
-        elif file["type"] == "gap_working":
-            sw_file_path = sw_file_path or local
+        # First asset_inventory -> hardware, second -> software
+        if file.get("type") == "asset_inventory":
+            if hw_file_path is None:
+                hw_file_path = local
+            else:
+                sw_file_path = local
+        # Also accept explicit gap_working for software
+        elif file.get("type") == "gap_working" and sw_file_path is None:
+            sw_file_path = local
 
     # Merge & classify
     def merge_with_template(df_template, df_inv):
@@ -192,7 +199,9 @@ def generate_assessment(
         return pd.concat([df_template, df_inv], ignore_index=True)
 
     def apply_classification(df):
-        return df.merge(CLASSIFICATION_DF, how="left", left_on="Tier Total Score", right_on="Score") if not df.empty and "Tier Total Score" in df.columns else df
+        if not df.empty and "Tier Total Score" in df.columns:
+            return df.merge(CLASSIFICATION_DF, how="left", left_on="Tier Total Score", right_on="Score")
+        return df
 
     if hw_file_path:
         hw_df = merge_with_template(HW_BASE_DF.copy(), pd.read_excel(hw_file_path))
@@ -216,7 +225,8 @@ def generate_assessment(
     links = {}
     for idx, df in enumerate((hw_df, sw_df), start=1):
         if not df.empty:
-            path = os.path.join(session_path, f"{['HW','SW'][idx-1]}GapAnalysis_{session_id}.xlsx")
+            file_label = ['HW', 'SW'][idx-1]
+            path = os.path.join(session_path, f"{file_label}GapAnalysis_{session_id}.xlsx")
             df.to_excel(path, index=False)
             links[f"file_{idx}_drive_url"] = upload_to_drive(path, os.path.basename(path), session_id)
 
@@ -245,7 +255,10 @@ def generate_assessment(
     section_20_next_steps         = build_section_20_next_steps(hw_df, sw_df)
 
     # Appendices
-    classification_matrix_md = CLASSIFICATION_DF.to_markdown(index=False)
+    try:
+        classification_matrix_md = CLASSIFICATION_DF.to_markdown(index=False)
+    except Exception:
+        classification_matrix_md = CLASSIFICATION_DF.to_csv(index=False)
     data_sources_text        = "Data sources: asset inventory files, GAP templates, classification tiers."
 
     # Build full payload
@@ -307,15 +320,15 @@ def generate_assessment(
     print(f"[DEBUG] Report-Generator response: {gen}", flush=True)
 
     # Download & upload DOCX/PPTX back to Drive
-    docx_rel, pptx_rel = gen["docx_url"], gen["pptx_url"]
+    docx_rel, pptx_rel = gen.get("docx_url"), gen.get("pptx_url")
     docx_url = f"{DOCX_SERVICE_URL.rstrip('/')}" + docx_rel
     pptx_url = f"{DOCX_SERVICE_URL.rstrip('/')}" + pptx_rel
     docx_name, pptx_name = os.path.basename(docx_rel), os.path.basename(pptx_rel)
     docx_local = os.path.join(session_path, docx_name)
     pptx_local = os.path.join(session_path, pptx_name)
     for dl_url, local in [(docx_url, docx_local), (pptx_url, pptx_local)]:
-        dl = requests.get(dl_url); dl.raise_for_status()
-        with open(local, "wb") as f: f.write(dl.content)
+        resp_dl = requests.get(dl_url); resp_dl.raise_for_status()
+        with open(local, "wb") as f: f.write(resp_dl.content)
     links["file_3_drive_url"] = upload_to_drive(docx_local, docx_name, session_id)
     links["file_4_drive_url"] = upload_to_drive(pptx_local, pptx_name, session_id)
 
