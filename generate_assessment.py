@@ -143,7 +143,7 @@ def generate_assessment(
         try:
             dl_url = _to_direct_drive_url(local_path)
             print(f"[DEBUG] Uploading chart {local_path} to Drive", flush=True)
-            drive_url = upload_to_drive(local_path, os.path.basename(local_path), folder_id)
+            drive_url = upload_to_drive(local_path, os.path.basename(local_path), session_id)
             chart_paths[name] = drive_url
             print(f"[DEBUG] Chart {name} uploaded: {drive_url}", flush=True)
         except Exception as ex:
@@ -164,7 +164,7 @@ def generate_assessment(
     for idx, path in enumerate([hw_gap, sw_gap], start=1):
         if path and os.path.exists(path):
             print(f"[DEBUG] Uploading gap sheet {path} → Drive", flush=True)
-            url = upload_to_drive(path, os.path.basename(path), folder_id)
+            url = upload_to_drive(path, os.path.basename(path), session_id)
             links[f"file_{idx}_drive_url"] = url
             print(f"[DEBUG] Uploaded to: {url}", flush=True)
 
@@ -208,8 +208,8 @@ def generate_assessment(
             f.write(dl.content)
         print(f"[DEBUG] Saved to {local}", flush=True)
 
-    links["file_3_drive_url"] = upload_to_drive(docx_local, docx_name, folder_id)
-    links["file_4_drive_url"] = upload_to_drive(pptx_local, pptx_name, folder_id)
+    links["file_3_drive_url"] = upload_to_drive(docx_local, docx_name, session_id)
+    links["file_4_drive_url"] = upload_to_drive(pptx_local, pptx_name, session_id)
     print(f"[DEBUG] Uploaded DOCX+PPTX to Drive: {links['file_3_drive_url']}, {links['file_4_drive_url']}", flush=True)
     # ──────────────────────────────────────────────
 
