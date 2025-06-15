@@ -135,7 +135,7 @@ def generate_assessment(
     chart_paths = generate_visual_charts(hw_df, sw_df, session_id)
     print(f"[DEBUG] Charts: {chart_paths}", flush=True)
 
-    # Determine the Drive folder (but we upload by session_id, not raw ID)
+    # Determine the Drive folder (unused folder_id fallback)
     if not folder_id:
         folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
         print(f"[DEBUG] Fallback folder_id (unused): {folder_id}", flush=True)
@@ -176,15 +176,67 @@ def generate_assessment(
     recommendations = build_recommendations(hw_df, sw_df)
     key_findings    = build_key_findings(hw_df, sw_df)
 
+    # ==== Expanded payload with all placeholders ====
     payload = {
-        "session_id":      session_id,
-        "hw_gap_url":      links.get("file_1_drive_url"),
-        "sw_gap_url":      links.get("file_2_drive_url"),
-        "chart_paths":     chart_paths,
-        "score_summary":   score_summary,
-        "recommendations": recommendations,
-        "key_findings":    key_findings
+        # Core session info
+        "session_id": session_id,
+        "email":       email,
+        "goal":        goal,
+
+        # GAP URLs & charts
+        "hw_gap_url":  links.get("file_1_drive_url"),
+        "sw_gap_url":  links.get("file_2_drive_url"),
+        "chart_paths": chart_paths,
+
+        # DOCX sections
+        "content_1":  score_summary,
+        "content_2":  score_summary,
+        "content_3":  score_summary,
+        "content_4":  score_summary,
+        "content_5":  score_summary,
+        "content_6":  score_summary,
+        "content_7":  score_summary,
+        "content_8":  score_summary,
+        "content_9":  score_summary,
+        "content_10": score_summary,
+        "content_11": score_summary,
+        "content_12": score_summary,
+        "content_13": score_summary,
+        "content_14": score_summary,
+        "content_15": score_summary,
+        "content_16": key_findings,
+        "content_17": score_summary,
+        "content_18": score_summary,
+        "content_19": recommendations,
+        "content_20": score_summary,
+
+        # Appendices
+        "appendix_classification_matrix": CLASSIFICATION_DF.to_markdown(index=False),
+        "appendix_data_sources":          "Data sources: asset inventory, GAP templates, classification tiers.",
+
+        # PPTX slides
+        "slide_executive_summary":           score_summary,
+        "slide_it_landscape_overview":       score_summary,
+        "slide_hardware_analysis":           score_summary,
+        "slide_software_analysis":           score_summary,
+        "slide_tier_classification_summary": score_summary,
+        "slide_hardware_lifecycle_chart":    score_summary,
+        "slide_software_licensing_review":   score_summary,
+        "slide_security_vulnerability_heatmap": score_summary,
+        "slide_performance_&_uptime_trends": score_summary,
+        "slide_system_reliability_overview": score_summary,
+        "slide_scalability_insights":        score_summary,
+        "slide_legacy_system_exposure":      score_summary,
+        "slide_obsolete_platform_matrix":    score_summary,
+        "slide_cloud_migration_targets":     score_summary,
+        "slide_strategic_it_alignment":      score_summary,
+        "slide_business_impact_of_gaps":     key_findings,
+        "slide_cost_of_obsolescence":        score_summary,
+        "slide_sustainability_&_green_it":    score_summary,
+        "slide_remediation_recommendations":  recommendations,
+        "slide_roadmap_&_next_steps":        score_summary,
     }
+
     print(f"[DEBUG] Calling Report-Generator at {DOCX_SERVICE_URL}/generate_assessment", flush=True)
     resp = requests.post(f"{DOCX_SERVICE_URL}/generate_assessment", json=payload)
     resp.raise_for_status()
@@ -195,8 +247,8 @@ def generate_assessment(
     # Download & upload DOCX/PPTX back to Drive
     docx_rel = gen["docx_url"]
     pptx_rel = gen["pptx_url"]
-    docx_url = f"{DOCX_SERVICE_URL.rstrip('/')}{docx_rel}"
-    pptx_url = f"{DOCX_SERVICE_URL.rstrip('/')}{pptx_rel}"
+    docx_url = f"{DOCX_SERVICE_URL.rstrip('/')}{{docx_rel}}"
+    pptx_url = f"{DOCX_SERVICE_URL.rstrip('/')}{{pptx_rel}}"
 
     docx_name  = os.path.basename(docx_rel)
     pptx_name  = os.path.basename(pptx_rel)
@@ -214,7 +266,6 @@ def generate_assessment(
     links["file_4_drive_url"] = upload_to_drive(pptx_local, pptx_name, session_id)
     print(f"[DEBUG] Uploaded DOCX+PPTX to Drive: "
           f"{links['file_3_drive_url']}, {links['file_4_drive_url']}", flush=True)
-    # ──────────────────────────────────────────────
 
     result = {
         "session_id": session_id,
