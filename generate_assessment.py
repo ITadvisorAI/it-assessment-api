@@ -323,8 +323,8 @@ def generate_assessment(
 
     # Download & upload DOCX/PPTX back to Drive
     docx_rel, pptx_rel = gen.get("docx_url"), gen.get("pptx_url")
-    docx_url = f"{DOCX_SERVICE_URL.rstrip('/')}{docx_rel}"
-    pptx_url = f"{DOCX_SERVICE_URL.rstrip('/')}{pptx_rel}"
+    docx_url = docx_rel
+    pptx_url = pptx_rel
     docx_name, pptx_name = os.path.basename(docx_rel), os.path.basename(pptx_rel)
     docx_local = os.path.join(session_path, docx_name)
     pptx_local = os.path.join(session_path, pptx_name)
