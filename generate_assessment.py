@@ -26,6 +26,7 @@ DOCX_SERVICE_URL = os.getenv(
     "DOCX_SERVICE_URL",
     "https://docx-generator-api.onrender.com"
 )
+MARKET_GAP_WEBHOOK = "https://market-gap-analysis.onrender.com/start_market_gap"
 
 
 def build_score_summary(hw_df, sw_df):
@@ -338,12 +339,11 @@ def generate_assessment(
         "status":     "complete",
         **links
     }
-    if next_action_webhook:
         try:
-            r = requests.post(next_action_webhook, json=result)
-            print(f"[DEBUG] Downstream notify status: {r.status_code}", flush=True)
+            r = requests.post(MARKET_GAP_WEBHOOK, json=result)
+            print(f"[DEBUG] Market-GAP notify status: {r.status_code}", flush=True)
         except Exception as e:
-            print(f"❌ Downstream notify failed: {e}", flush=True)
+            print(f"❌ Market-GAP notify failed: {e}", flush=True)
     return result
 
 
