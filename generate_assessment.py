@@ -1,6 +1,5 @@
 import os
 import re
-import json
 import pandas as pd
 import requests
 from market_lookup import suggest_hw_replacements, suggest_sw_replacements
@@ -11,134 +10,357 @@ from docx import Document
 from pptx import Presentation
 from pptx.util import Inches
 
-# Configuration
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
-OUTPUT_DIR = os.getenv("OUTPUT_DIR", "temp_sessions")
-DOCX_SERVICE_URL = os.getenv("DOCX_SERVICE_URL", "https://docx-generator-api.onrender.com")
-MARKET_GAP_WEBHOOK = os.getenv("MARKET_GAP_WEBHOOK", "https://market-gap-analysis.onrender.com/start_market_gap")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
+OUTPUT_DIR = "temp_sessions"
 
-# Cache templates
-print("[DEBUG] Loading templates...", flush=True)
+# ──────────────────────────────────────────────
+# Cache templates at import time (only once)
+print("[DEBUG] Loading template spreadsheets into memory...", flush=True)
 HW_BASE_DF = pd.read_excel(os.path.join(TEMPLATES_DIR, "HWGapAnalysis.xlsx"))
 SW_BASE_DF = pd.read_excel(os.path.join(TEMPLATES_DIR, "SWGapAnalysis.xlsx"))
 CLASSIFICATION_DF = pd.read_excel(os.path.join(TEMPLATES_DIR, "ClassificationTier.xlsx"))
-print("[DEBUG] Templates loaded", flush=True)
+print("[DEBUG] Templates cached successfully", flush=True)
+# ──────────────────────────────────────────────
+
+DOCX_SERVICE_URL = os.getenv(
+    "DOCX_SERVICE_URL",
+    "https://docx-generator-api.onrender.com"
+)
+MARKET_GAP_WEBHOOK = "https://market-gap-analysis.onrender.com/start_market_gap"
 
 
-def download_spreadsheet(file_meta, dest_dir):
-    url = file_meta['file_url']
-    local_path = os.path.join(dest_dir, file_meta['file_name'])
-    r = requests.get(url)
-    r.raise_for_status()
-    with open(local_path, 'wb') as f:
-        f.write(r.content)
-    return local_path
+def build_score_summary(hw_df, sw_df):
+    hw_count = len(hw_df) if hw_df is not None else 0
+    sw_count = len(sw_df) if sw_df is not None else 0
+    return (
+        f"Your hardware inventory contains {hw_count} items, "
+        f"and your software inventory contains {sw_count} items."
+    )
 
 
-def call_gpt_for_section(prompt_text):
-    if not OPENAI_API_KEY:
-        raise RuntimeError("OPENAI_API_KEY not set")
-    headers = {
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": "gpt-4o-mini",
-        "messages": [
-            {"role": "system", "content": "You are an IT Transformation Advisor that writes clear, concise technical report sections."},
-            {"role": "user", "content": prompt_text}
-        ],
-        "temperature": 0.7
-    }
-    resp = requests.post(OPENAI_API_URL, headers=headers, json=payload)
-    resp.raise_for_status()
-    data = resp.json()
-    return data["choices"][0]["message"]["content"].strip()
+def build_recommendations(hw_df, sw_df):
+    recs = []
+    if hw_df is None or hw_df.empty:
+        recs.append("No hardware data provided.")
+    else:
+        recs.append("Review hardware tiers for under-resourced assets.")
+    if sw_df is None or sw_df.empty:
+        recs.append("No software data provided.")
+    else:
+        recs.append("Ensure all applications are classified by criticality.")
+    return " ".join(recs)
 
 
-def generate_assessment(session_id, email, goal, files, next_action_webhook="", folder_id=None):
-    print(f"[DEBUG] Starting assessment for session {session_id}", flush=True)
+def build_key_findings(hw_df, sw_df):
+    findings = []
+    if hw_df is not None and "Tier Total Score" in hw_df.columns:
+        max_score = hw_df["Tier Total Score"].max()
+        findings.append(f"Maximum hardware tier score: {max_score}.")
+    if sw_df is not None and "Tier Total Score" in sw_df.columns:
+        avg_score = sw_df["Tier Total Score"].mean()
+        findings.append(f"Average software tier score: {avg_score:.1f}.")
+    return " ".join(findings)
+
+
+def build_section_2_overview(hw_df, sw_df):
+    return (
+        f"The organization’s IT landscape includes {len(hw_df)} hardware assets "
+        f"and {len(sw_df)} software assets across multiple environments."
+    )
+
+
+def build_section_3_hardware_breakdown(hw_df, sw_df):
+    if "Device Type" in hw_df.columns:
+        counts = hw_df["Device Type"].value_counts().to_dict()
+        return f"Hardware inventory breakdown by type: {counts}."
+    return f"Hardware asset count: {len(hw_df)}."
+
+
+def build_section_4_software_breakdown(hw_df, sw_df):
+    if "Application" in sw_df.columns:
+        counts = sw_df["Application"].value_counts().to_dict()
+        return f"Software inventory breakdown by application: {counts}."
+    return f"Software asset count: {len(sw_df)}."
+
+
+def build_section_5_tier_distribution(hw_df, sw_df):
+    if "Tier" in hw_df.columns:
+        dist = hw_df["Tier"].value_counts().to_dict()
+        return f"Tier distribution for hardware: {dist}."
+    return "Tier distribution data unavailable."
+
+
+def build_section_6_hardware_lifecycle(hw_df, sw_df):
+    if "Lifecycle Status" in hw_df.columns:
+        stats = hw_df["Lifecycle Status"].value_counts().to_dict()
+        return f"Hardware lifecycle statuses: {stats}."
+    return "Lifecycle status data unavailable."
+
+
+def build_section_7_software_licensing(hw_df, sw_df):
+    if "License Status" in sw_df.columns:
+        lic = sw_df["License Status"].value_counts().to_dict()
+        return f"Software licensing status: {lic}."
+    return "Licensing data unavailable."
+
+
+def build_section_8_security_posture(hw_df, sw_df):
+    return "Security posture analysis pending integration."
+
+
+def build_section_9_performance_metrics(hw_df, sw_df):
+    return "Performance metrics analysis pending integration."
+
+
+def build_section_10_reliability(hw_df, sw_df):
+    return "Reliability metrics analysis pending integration."
+
+
+def build_section_11_scalability(hw_df, sw_df):
+    return "Scalability assessment pending integration."
+
+
+def build_section_12_legacy_debt(hw_df, sw_df):
+    return "Legacy systems and technical debt analysis pending integration."
+
+
+def build_section_13_obsolete_platforms(hw_df, sw_df):
+    return "Obsolete platform identification pending integration."
+
+
+def build_section_14_cloud_migration(hw_df, sw_df):
+    return "Cloud migration potential analysis pending integration."
+
+
+def build_section_15_strategic_alignment(hw_df, sw_df):
+    return "Strategic alignment analysis pending integration."
+
+
+def build_section_17_financial_implications(hw_df, sw_df):
+    return "Financial implications analysis pending integration."
+
+
+def build_section_18_sustainability(hw_df, sw_df):
+    return "Environmental impact and sustainability analysis pending integration."
+
+
+def build_section_20_next_steps(hw_df, sw_df):
+    return "Recommended next steps and roadmap pending integration."
+
+
+def _to_direct_drive_url(url: str) -> str:
+    m = re.search(r"/d/([A-Za-z0-9_-]+)", url)
+    if m:
+        return f"https://drive.google.com/uc?export=download&id={m.group(1)}"
+    return url
+
+
+def generate_assessment(
+    session_id,
+    email,
+    goal,
+    files,
+    next_action_webhook="",
+    folder_id=None
+):
+    print("[DEBUG] Entered generate_assessment()", flush=True)
     session_path = os.path.join(OUTPUT_DIR, session_id)
     os.makedirs(session_path, exist_ok=True)
 
-    # Load data frames
-    hw_df = pd.DataFrame()
-    sw_df = pd.DataFrame()
-    for f_meta in files:
-        if f_meta.get('type') == 'hardware_gap_excel':
-            hw_path = download_spreadsheet(f_meta, session_path)
-            hw_df = pd.read_excel(hw_path)
-        elif f_meta.get('type') == 'software_gap_excel':
-            sw_path = download_spreadsheet(f_meta, session_path)
-            sw_df = pd.read_excel(sw_path)
+    hw_df, sw_df = pd.DataFrame(), pd.DataFrame()
+    hw_file_path = sw_file_path = None
+    for file in files:
+        url, name = file.get("file_url"), file.get("file_name")
+        local = os.path.join(session_path, name)
+        print(f"[DEBUG] Downloading file {name} from {url}", flush=True)
+        if url.startswith("http"):
+            resp = requests.get(_to_direct_drive_url(url))
+            resp.raise_for_status()
+            with open(local, "wb") as f:
+                f.write(resp.content)
+        else:
+            with open(url, "rb") as src, open(local, "wb") as dst:
+                dst.write(src.read())
+        print(f"[DEBUG] Saved to {local}", flush=True)
+        # First asset_inventory -> hardware, second -> software
+        if file.get("type") == "asset_inventory":
+            if hw_file_path is None:
+                hw_file_path = local
+            else:
+                sw_file_path = local
+        # Also accept explicit gap_working for software
+        elif file.get("type") == "gap_working" and sw_file_path is None:
+            sw_file_path = local
 
-    # Analysis suggestions
-    hw_suggestions = suggest_hw_replacements(hw_df) if not hw_df.empty else []
-    sw_suggestions = suggest_sw_replacements(sw_df) if not sw_df.empty else []
+    # Merge & classify
+    def merge_with_template(df_template, df_inv):
+        for c in df_inv.columns:
+            if c not in df_template.columns:
+                df_template[c] = None
+        df_inv = df_inv.reindex(columns=df_template.columns, fill_value=None)
+        return pd.concat([df_template, df_inv], ignore_index=True)
 
-    # Generate visual charts and upload to Drive
-    chart_paths = generate_visual_charts(hw_df, sw_df, session_path)
-    chart_urls = []
-    for path in chart_paths:
-        drive_url = upload_to_drive(path, folder_id)
-        chart_urls.append(drive_url)
+    def apply_classification(df):
+        if not df.empty and "Tier Total Score" in df.columns:
+            return df.merge(CLASSIFICATION_DF, how="left", left_on="Tier Total Score", right_on="Score")
+        return df
 
-    # Define dynamic report sections
-    section_prompts = {
-        "introduction": f"Write an executive summary introduction for IT Infrastructure assessment session {session_id} with goal: {goal}.",
-        "hardware_analysis": f"Analyze the hardware gap data and suggest replacements based on: {hw_suggestions}.",
-        "software_analysis": f"Analyze the software gap data and suggest replacements based on: {sw_suggestions}.",
-        "key_findings": "Identify key findings based on the hardware and software data frames provided.",
-        "recommendations": "Provide high-level recommendations for IT modernization based on the analyses.",
-        "next_steps": "Outline the next steps and roadmap for implementing these recommendations."
-    }
+    if hw_file_path:
+        hw_df = merge_with_template(HW_BASE_DF.copy(), pd.read_excel(hw_file_path))
+        hw_df = suggest_hw_replacements(hw_df)
+        hw_df = apply_classification(hw_df)
+    if sw_file_path:
+        sw_df = merge_with_template(SW_BASE_DF.copy(), pd.read_excel(sw_file_path))
+        sw_df = suggest_sw_replacements(sw_df)
+        sw_df = apply_classification(sw_df)
 
-    # Generate content via GPT
-    narratives = {}
-    for name, prompt in section_prompts.items():
+    # Charts
+    chart_paths = generate_visual_charts(hw_df, sw_df, session_id)
+    for name, local_path in chart_paths.items():
         try:
-            narratives[name] = call_gpt_for_section(prompt)
-        except Exception as e:
-            print(f"[ERROR] GPT section generation failed for {name}: {e}", flush=True)
-            narratives[name] = ""
+            url = upload_to_drive(local_path, os.path.basename(local_path), session_id)
+            chart_paths[name] = url
+        except Exception as ex:
+            print(f"❌ Failed upload chart {name}: {ex}", flush=True)
 
-    # Build payload for Market Gap Analysis
+    # Save & upload GAP sheets
+    links = {}
+    for idx, df in enumerate((hw_df, sw_df), start=1):
+        if not df.empty:
+            file_label = ['HW', 'SW'][idx - 1]
+            path = os.path.join(session_path, f"{file_label}GapAnalysis_{session_id}.xlsx")
+            df.to_excel(path, index=False)
+            links[f"file_{idx}_drive_url"] = upload_to_drive(path, os.path.basename(path), session_id)
+
+    # Build narratives
+    score_summary = build_score_summary(hw_df, sw_df)
+    recommendations = build_recommendations(hw_df, sw_df)
+    key_findings = build_key_findings(hw_df, sw_df)
+
+    # Section content
+    section_2_overview = build_section_2_overview(hw_df, sw_df)
+    section_3_hardware_breakdown = build_section_3_hardware_breakdown(hw_df, sw_df)
+    section_4_software_breakdown = build_section_4_software_breakdown(hw_df, sw_df)
+    section_5_tier_distribution = build_section_5_tier_distribution(hw_df, sw_df)
+    section_6_hardware_lifecycle = build_section_6_hardware_lifecycle(hw_df, sw_df)
+    section_7_software_licensing = build_section_7_software_licensing(hw_df, sw_df)
+    section_8_security_posture = build_section_8_security_posture(hw_df, sw_df)
+    section_9_performance_metrics = build_section_9_performance_metrics(hw_df, sw_df)
+    section_10_reliability = build_section_10_reliability(hw_df, sw_df)
+    section_11_scalability = build_section_11_scalability(hw_df, sw_df)
+    section_12_legacy_debt = build_section_12_legacy_debt(hw_df, sw_df)
+    section_13_obsolete_platforms = build_section_13_obsolete_platforms(hw_df, sw_df)
+    section_14_cloud_migration = build_section_14_cloud_migration(hw_df, sw_df)
+    section_15_strategic_alignment = build_section_15_strategic_alignment(hw_df, sw_df)
+    section_17_financial_implications = build_section_17_financial_implications(hw_df, sw_df)
+    section_18_sustainability = build_section_18_sustainability(hw_df, sw_df)
+    section_20_next_steps = build_section_20_next_steps(hw_df, sw_df)
+
+    # Appendices
+    try:
+        classification_matrix_md = CLASSIFICATION_DF.to_markdown(index=False)
+    except Exception:
+        classification_matrix_md = CLASSIFICATION_DF.to_csv(index=False)
+    data_sources_text = "Data sources: asset inventory files, GAP templates, classification tiers."
+
+    # Build full payload
     payload = {
         "session_id": session_id,
         "email": email,
         "goal": goal,
-        "folder_id": folder_id,
-        "files": files,
-        "charts": chart_urls,
-        "narratives": narratives
+        "hw_gap_url": links.get("file_1_drive_url"),
+        "sw_gap_url": links.get("file_2_drive_url"),
+        "chart_paths": chart_paths,
+        "content_1": score_summary,
+        "content_2": section_2_overview,
+        "content_3": section_3_hardware_breakdown,
+        "content_4": section_4_software_breakdown,
+        "content_5": section_5_tier_distribution,
+        "content_6": section_6_hardware_lifecycle,
+        "content_7": section_7_software_licensing,
+        "content_8": section_8_security_posture,
+        "content_9": section_9_performance_metrics,
+        "content_10": section_10_reliability,
+        "content_11": section_11_scalability,
+        "content_12": section_12_legacy_debt,
+        "content_13": section_13_obsolete_platforms,
+        "content_14": section_14_cloud_migration,
+        "content_15": section_15_strategic_alignment,
+        "content_16": key_findings,
+        "content_17": section_17_financial_implications,
+        "content_18": section_18_sustainability,
+        "content_19": recommendations,
+        "content_20": section_20_next_steps,
+        "appendix_classification_matrix": classification_matrix_md,
+        "appendix_data_sources": data_sources_text,
+        "slide_executive_summary": score_summary,
+        "slide_it_landscape_overview": section_2_overview,
+        "slide_hardware_analysis": section_3_hardware_breakdown,
+        "slide_software_analysis": section_4_software_breakdown,
+        "slide_tier_classification_summary": section_5_tier_distribution,
+        "slide_hardware_lifecycle_chart": section_6_hardware_lifecycle,
+        "slide_software_licensing_review": section_7_software_licensing,
+        "slide_security_vulnerability_heatmap": section_8_security_posture,
+        "slide_performance_&_uptime_trends": section_9_performance_metrics,
+        "slide_system_reliability_overview": section_10_reliability,
+        "slide_scalability_insights": section_11_scalability,
+        "slide_legacy_system_exposure": section_12_legacy_debt,
+        "slide_obsolete_platform_matrix": section_13_obsolete_platforms,
+        "slide_cloud_migration_targets": section_14_cloud_migration,
+        "slide_strategic_it_alignment": section_15_strategic_alignment,
+        "slide_business_impact_of_gaps": key_findings,
+        "slide_cost_of_obsolescence": section_17_financial_implications,
+        "slide_sustainability_&_green_it": section_18_sustainability,
+        "slide_remediation_recommendations": recommendations,
+        "slide_roadmap_&_next_steps": section_20_next_steps,
     }
 
-    # POST to Market Gap Analysis service
-    print(f"[DEBUG] Posting payload to {MARKET_GAP_WEBHOOK}", flush=True)
-    response = requests.post(MARKET_GAP_WEBHOOK, json=payload)
-    response.raise_for_status()
-    print(f"[DEBUG] Market Gap API responded with status {response.status_code}", flush=True)
-    return response.json()
+    print(f"[DEBUG] Calling Report-Generator at {DOCX_SERVICE_URL}/generate_assessment", flush=True)
+    resp = requests.post(f"{DOCX_SERVICE_URL}/generate_assessment", json=payload)
+    resp.raise_for_status()
+    gen = resp.json()
+    print(f"[DEBUG] Report-Generator response: {gen}", flush=True)
+
+    # Download & upload DOCX/PPTX back to Drive
+    docx_rel, pptx_rel = gen.get("docx_url"), gen.get("pptx_url")
+    docx_url = docx_rel
+    pptx_url = pptx_rel
+    docx_name, pptx_name = os.path.basename(docx_rel), os.path.basename(pptx_rel)
+    docx_local = os.path.join(session_path, docx_name)
+    pptx_local = os.path.join(session_path, pptx_name)
+    for dl_url, local in [(docx_url, docx_local), (pptx_url, pptx_local)]:
+        resp_dl = requests.get(dl_url)
+        resp_dl.raise_for_status()
+        with open(local, "wb") as f:
+            f.write(resp_dl.content)
+    links["file_3_drive_url"] = upload_to_drive(docx_local, docx_name, session_id)
+    links["file_4_drive_url"] = upload_to_drive(pptx_local, pptx_name, session_id)
+
+    result = {
+        "session_id": session_id,
+        "gpt_module": "it_assessment",
+        "status": "complete",
+        **links
+    }
+
+    try:
+        r = requests.post(MARKET_GAP_WEBHOOK, json=result)
+        print(f"[DEBUG] Market-GAP notify status: {r.status_code}", flush=True)
+    except Exception as e:
+        print(f"❌ Market-GAP notify failed: {e}", flush=True)
+
+    return result
 
 
-def process_assessment(payload):
+def process_assessment(data):
+    session_id = data.get("session_id")
+    email = data.get("email")
+    goal = data.get("goal", "project plan")
+    files = data.get("files", [])
+    next_action_webhook = data.get("next_action_webhook", "")
+    folder_id = data.get("folder_id")
+
+    print("[DEBUG] Entered process_assessment()", flush=True)
     return generate_assessment(
-        session_id=payload.get('session_id'),
-        email=payload.get('email'),
-        goal=payload.get('goal'),
-        files=payload.get('files', []),
-        next_action_webhook=payload.get('next_action_webhook', ''),
-        folder_id=payload.get('folder_id')
+        session_id, email, goal, files, next_action_webhook, folder_id
     )
-
-
-def main():
-    import sys
-    input_data = json.load(sys.stdin)
-    result = process_assessment(input_data)
-    print(json.dumps(result))
-
-if __name__ == '__main__':
-    main()
