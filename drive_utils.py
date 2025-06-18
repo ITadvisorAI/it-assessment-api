@@ -1,54 +1,68 @@
+import os
+import re
 from googleapiclient.http import MediaFileUpload
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
-import os
 
+# Path to your service account JSON key
 SERVICE_ACCOUNT_FILE = "/etc/secrets/service_account.json"
+
+# Authenticate and construct the Drive API client
 creds = service_account.Credentials.from_service_account_file(
     SERVICE_ACCOUNT_FILE,
     scopes=["https://www.googleapis.com/auth/drive"]
 )
 drive_service = build('drive', 'v3', credentials=creds)
 
-def upload_to_drive(file_path, file_name, session_folder_name):
-    try:
-        # Step 1: Locate the session folder by name
-        folder_query = f"name='{session_folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed = false"
-        folders = drive_service.files().list(q=folder_query, fields="files(id)").execute().get("files", [])
+def upload_to_drive(file_path: str, file_name: str, folder_identifier: str) -> str:
+    """
+    Upload a local file to Google Drive, using either a folder name or a folder ID.
 
-        if not folders:
-            raise Exception(f"No Google Drive folder found for session: {session_folder_name}")
+    :param file_path: Local path to the file
+    :param file_name: Name to assign to the file in Drive
+    :param folder_identifier: Drive folder ID or folder name
+    :return: webViewLink for the uploaded file
+    """
+    # Determine if the identifier is a Drive folder ID (alphanumeric, "-" or "_", ~20+ chars)
+    if re.fullmatch(r"[A-Za-z0-9_-]{20,}", folder_identifier):
+        folder_id = folder_identifier
+    else:
+        # Look up a folder by name
+        query = (
+            f"name='{folder_identifier}' and mimeType='application/vnd.google-apps.folder' "
+            "and trashed = false"
+        )
+        resp = drive_service.files().list(q=query, fields="files(id, name)").execute()
+        files = resp.get('files', [])
+        if files:
+            folder_id = files[0]['id']
+        else:
+            # Create the folder if not found
+            metadata = {
+                'name': folder_identifier,
+                'mimeType': 'application/vnd.google-apps.folder'
+            }
+            created = drive_service.files().create(body=metadata, fields="id").execute()
+            folder_id = created.get('id')
 
-        folder_id = folders[0]['id']
+    # Upload the file into the resolved folder
+    media = MediaFileUpload(file_path, resumable=True)
+    file_metadata = {
+        'name': file_name,
+        'parents': [folder_id]
+    }
+    uploaded = drive_service.files().create(
+        body=file_metadata,
+        media_body=media,
+        fields="id, webViewLink"
+    ).execute()
 
-        # Step 2: Prepare media for upload
-        mime_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document" if file_name.endswith(".docx") else \
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if file_name.endswith(".xlsx") else \
-                    "application/vnd.openxmlformats-officedocument.presentationml.presentation" if file_name.endswith(".pptx") else \
-                    "application/octet-stream"
+    # Make the file publicly readable
+    drive_service.permissions().create(
+        fileId=uploaded['id'],
+        body={'type': 'anyone', 'role': 'reader'},
+        fields='id'
+    ).execute()
 
-        media = MediaFileUpload(file_path, mimetype=mime_type)
-
-        # Step 3: Upload the file
-        uploaded = drive_service.files().create(
-            body={
-                "name": file_name,
-                "parents": [folder_id]
-            },
-            media_body=media,
-            fields="id, webViewLink"
-        ).execute()
-
-        # Step 4: Make uploaded file publicly viewable
-        drive_service.permissions().create(
-            fileId=uploaded['id'],
-            body={"type": "anyone", "role": "reader"},
-            fields="id"
-        ).execute()
-
-        print(f"[UPLOAD] File uploaded to Google Drive: {uploaded['webViewLink']}")
-        return uploaded["webViewLink"]
-
-    except Exception as e:
-        print(f"[ERROR] Failed to upload to Drive: {e}")
-        raise
+    print(f"[UPLOAD] '{file_name}' uploaded to folder '{folder_identifier}' (ID: {folder_id})")
+    return uploaded.get('webViewLink', '')
