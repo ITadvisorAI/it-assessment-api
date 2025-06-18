@@ -3,7 +3,6 @@ import re
 import json
 import pandas as pd
 import requests
-import openai
 from market_lookup import suggest_hw_replacements, suggest_sw_replacements
 from visualization import generate_visual_charts
 from drive_utils import upload_to_drive
@@ -14,10 +13,11 @@ from pptx.util import Inches
 
 # Configuration
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
-OUTPUT_DIR = "temp_sessions"
+OUTPUT_DIR = os.getenv("OUTPUT_DIR", "temp_sessions")
 DOCX_SERVICE_URL = os.getenv("DOCX_SERVICE_URL", "https://docx-generator-api.onrender.com")
 MARKET_GAP_WEBHOOK = os.getenv("MARKET_GAP_WEBHOOK", "https://market-gap-analysis.onrender.com/start_market_gap")
-openai.api_key = os.getenv("OPENAI_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
 
 # Cache templates
 print("[DEBUG] Loading templates...", flush=True)
@@ -37,16 +37,25 @@ def download_spreadsheet(file_meta, dest_dir):
     return local_path
 
 
-def call_gpt_for_section(prompt):
-    resp = openai.ChatCompletion.create(
-        model="gpt-4o-mini",
-        messages=[
+def call_gpt_for_section(prompt_text):
+    if not OPENAI_API_KEY:
+        raise RuntimeError("OPENAI_API_KEY not set")
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": "gpt-4o-mini",
+        "messages": [
             {"role": "system", "content": "You are an IT Transformation Advisor that writes clear, concise technical report sections."},
-            {"role": "user", "content": prompt}
+            {"role": "user", "content": prompt_text}
         ],
-        temperature=0.7
-    )
-    return resp.choices[0].message.content.strip()
+        "temperature": 0.7
+    }
+    resp = requests.post(OPENAI_API_URL, headers=headers, json=payload)
+    resp.raise_for_status()
+    data = resp.json()
+    return data["choices"][0]["message"]["content"].strip()
 
 
 def generate_assessment(session_id, email, goal, files, next_action_webhook="", folder_id=None):
@@ -54,43 +63,48 @@ def generate_assessment(session_id, email, goal, files, next_action_webhook="", 
     session_path = os.path.join(OUTPUT_DIR, session_id)
     os.makedirs(session_path, exist_ok=True)
 
-    # Load data
-    hw_df = sw_df = pd.DataFrame()
+    # Load data frames
+    hw_df = pd.DataFrame()
+    sw_df = pd.DataFrame()
     for f_meta in files:
-        if f_meta['type'] == 'hardware_gap_excel':
+        if f_meta.get('type') == 'hardware_gap_excel':
             hw_path = download_spreadsheet(f_meta, session_path)
             hw_df = pd.read_excel(hw_path)
-        elif f_meta['type'] == 'software_gap_excel':
+        elif f_meta.get('type') == 'software_gap_excel':
             sw_path = download_spreadsheet(f_meta, session_path)
             sw_df = pd.read_excel(sw_path)
 
-    # Perform analysis suggestions
-    hw_suggestions = suggest_hw_replacements(hw_df)
-    sw_suggestions = suggest_sw_replacements(sw_df)
+    # Analysis suggestions
+    hw_suggestions = suggest_hw_replacements(hw_df) if not hw_df.empty else []
+    sw_suggestions = suggest_sw_replacements(sw_df) if not sw_df.empty else []
 
-    # Generate charts and upload
+    # Generate visual charts and upload to Drive
     chart_paths = generate_visual_charts(hw_df, sw_df, output_dir=session_path)
     chart_urls = []
     for path in chart_paths:
-        url = upload_to_drive(path, folder_id)
-        chart_urls.append(url)
+        drive_url = upload_to_drive(path, folder_id)
+        chart_urls.append(drive_url)
 
-    # Define dynamic sections and prompts
+    # Define dynamic report sections
     section_prompts = {
-        "introduction": f"Write an executive summary introduction for IT Infrastructure assessment with goal: {goal}.",
-        "hardware_analysis": f"Analyze the hardware gap data and suggest replacements: {hw_suggestions}.",
-        "software_analysis": f"Analyze the software gap data and suggest replacements: {sw_suggestions}.",
-        "key_findings": "Identify key findings based on the data frames provided for hardware and software.",
+        "introduction": f"Write an executive summary introduction for IT Infrastructure assessment session {session_id} with goal: {goal}.",
+        "hardware_analysis": f"Analyze the hardware gap data and suggest replacements based on: {hw_suggestions}.",
+        "software_analysis": f"Analyze the software gap data and suggest replacements based on: {sw_suggestions}.",
+        "key_findings": "Identify key findings based on the hardware and software data frames provided.",
         "recommendations": "Provide high-level recommendations for IT modernization based on the analyses.",
         "next_steps": "Outline the next steps and roadmap for implementing these recommendations."
     }
 
-    # Generate content sections via GPT
+    # Generate content via GPT
     narratives = {}
-    for section, prompt in section_prompts.items():
-        narratives[section] = call_gpt_for_section(prompt)
+    for name, prompt in section_prompts.items():
+        try:
+            narratives[name] = call_gpt_for_section(prompt)
+        except Exception as e:
+            print(f"[ERROR] GPT section generation failed for {name}: {e}", flush=True)
+            narratives[name] = ""
 
-    # Build payload
+    # Build payload for Market Gap Analysis
     payload = {
         "session_id": session_id,
         "email": email,
@@ -101,27 +115,26 @@ def generate_assessment(session_id, email, goal, files, next_action_webhook="", 
         "narratives": narratives
     }
 
-    # Trigger Market Gap Analysis
+    # POST to Market Gap Analysis service
     print(f"[DEBUG] Posting payload to {MARKET_GAP_WEBHOOK}", flush=True)
-    resp = requests.post(MARKET_GAP_WEBHOOK, json=payload)
-    resp.raise_for_status()
-    print(f"[DEBUG] Received {resp.status_code}", flush=True)
-    return resp.json()
+    response = requests.post(MARKET_GAP_WEBHOOK, json=payload)
+    response.raise_for_status()
+    print(f"[DEBUG] Market Gap API responded with status {response.status_code}", flush=True)
+    return response.json()
 
 
 def main():
     import sys
-    data = json.load(sys.stdin)
+    input_data = json.load(sys.stdin)
     result = generate_assessment(
-        session_id=data.get('session_id'),
-        email=data.get('email'),
-        goal=data.get('goal'),
-        files=data.get('files', []),
-        next_action_webhook=data.get('next_action_webhook', ''),
-        folder_id=data.get('folder_id')
+        session_id=input_data.get('session_id'),
+        email=input_data.get('email'),
+        goal=input_data.get('goal'),
+        files=input_data.get('files', []),
+        next_action_webhook=input_data.get('next_action_webhook', ''),
+        folder_id=input_data.get('folder_id')
     )
     print(json.dumps(result))
-
 
 if __name__ == '__main__':
     main()
