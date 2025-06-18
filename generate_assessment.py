@@ -122,21 +122,23 @@ def generate_assessment(session_id, email, goal, files, next_action_webhook="", 
     print(f"[DEBUG] Market Gap API responded with status {response.status_code}", flush=True)
     return response.json()
 
-# For backward compatibility with app.py import
-process_assessment = generate_assessment
+
+def process_assessment(payload):
+    # Unpack payload dict to function parameters
+    return generate_assessment(
+        session_id=payload.get('session_id'),
+        email=payload.get('email'),
+        goal=payload.get('goal'),
+        files=payload.get('files', []),
+        next_action_webhook=payload.get('next_action_webhook', ''),
+        folder_id=payload.get('folder_id')
+    )
 
 
 def main():
     import sys
     input_data = json.load(sys.stdin)
-    result = generate_assessment(
-        session_id=input_data.get('session_id'),
-        email=input_data.get('email'),
-        goal=input_data.get('goal'),
-        files=input_data.get('files', []),
-        next_action_webhook=input_data.get('next_action_webhook', ''),
-        folder_id=input_data.get('folder_id')
-    )
+    result = process_assessment(input_data)
     print(json.dumps(result))
 
 if __name__ == '__main__':
