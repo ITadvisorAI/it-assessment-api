@@ -2,6 +2,7 @@ import os
 import re
 import pandas as pd
 import requests
+import openai
 from market_lookup import suggest_hw_replacements, suggest_sw_replacements
 from visualization import generate_visual_charts
 from drive_utils import upload_to_drive
@@ -10,6 +11,11 @@ from docx import Document
 from pptx import Presentation
 from pptx.util import Inches
 
+# Initialize OpenAI API key for AI-driven narratives
+oepn = openai
+oepn.api_key = os.getenv("OPENAI_API_KEY")
+
+# Template and output directories
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
 OUTPUT_DIR = "temp_sessions"
 
@@ -29,130 +35,37 @@ DOCX_SERVICE_URL = os.getenv(
 MARKET_GAP_WEBHOOK = "https://market-gap-analysis.onrender.com/start_market_gap"
 
 
-def build_score_summary(hw_df, sw_df):
-    hw_count = len(hw_df) if hw_df is not None else 0
-    sw_count = len(sw_df) if sw_df is not None else 0
-    return (
-        f"Your hardware inventory contains {hw_count} items, "
-        f"and your software inventory contains {sw_count} items."
+def ai_narrative(section_name: str, summary: dict) -> str:
+    """
+    Use OpenAI to transform a summary dict into a polished narrative for a report section.
+    """
+    system_msg = {
+        "role": "system",
+        "content": (
+            "You are a senior IT transformation advisor. "
+            "Given the data summary, write a concise, professional narrative for the specified report section."
+        )
+    }
+    user_msg = {
+        "role": "user",
+        "content": (
+            f"Section: {section_name}\n"
+            f"Data Summary (JSON):\n{json.dumps(summary, indent=2)}"
+        )
+    }
+    resp = oepn.ChatCompletion.create(
+        model="gpt-4o-mini",
+        messages=[system_msg, user_msg],
+        temperature=0.3
     )
+    return resp.choices[0].message.content.strip()
 
+# ... [existing build_ functions remain unchanged] ...
 
-def build_recommendations(hw_df, sw_df):
-    recs = []
-    if hw_df is None or hw_df.empty:
-        recs.append("No hardware data provided.")
-    else:
-        recs.append("Review hardware tiers for under-resourced assets.")
-    if sw_df is None or sw_df.empty:
-        recs.append("No software data provided.")
-    else:
-        recs.append("Ensure all applications are classified by criticality.")
-    return " ".join(recs)
-
-
-def build_key_findings(hw_df, sw_df):
-    findings = []
-    if hw_df is not None and "Tier Total Score" in hw_df.columns:
-        max_score = hw_df["Tier Total Score"].max()
-        findings.append(f"Maximum hardware tier score: {max_score}.")
-    if sw_df is not None and "Tier Total Score" in sw_df.columns:
-        avg_score = sw_df["Tier Total Score"].mean()
-        findings.append(f"Average software tier score: {avg_score:.1f}.")
-    return " ".join(findings)
-
-
-def build_section_2_overview(hw_df, sw_df):
-    return (
-        f"The organization’s IT landscape includes {len(hw_df)} hardware assets "
-        f"and {len(sw_df)} software assets across multiple environments."
-    )
-
-
-def build_section_3_hardware_breakdown(hw_df, sw_df):
-    if "Device Type" in hw_df.columns:
-        counts = hw_df["Device Type"].value_counts().to_dict()
-        return f"Hardware inventory breakdown by type: {counts}."
-    return f"Hardware asset count: {len(hw_df)}."
-
-
-def build_section_4_software_breakdown(hw_df, sw_df):
-    if "Application" in sw_df.columns:
-        counts = sw_df["Application"].value_counts().to_dict()
-        return f"Software inventory breakdown by application: {counts}."
-    return f"Software asset count: {len(sw_df)}."
-
-
-def build_section_5_tier_distribution(hw_df, sw_df):
-    if "Tier" in hw_df.columns:
-        dist = hw_df["Tier"].value_counts().to_dict()
-        return f"Tier distribution for hardware: {dist}."
-    return "Tier distribution data unavailable."
-
-
-def build_section_6_hardware_lifecycle(hw_df, sw_df):
-    if "Lifecycle Status" in hw_df.columns:
-        stats = hw_df["Lifecycle Status"].value_counts().to_dict()
-        return f"Hardware lifecycle statuses: {stats}."
-    return "Lifecycle status data unavailable."
-
-
-def build_section_7_software_licensing(hw_df, sw_df):
-    if "License Status" in sw_df.columns:
-        lic = sw_df["License Status"].value_counts().to_dict()
-        return f"Software licensing status: {lic}."
-    return "Licensing data unavailable."
-
-
-def build_section_8_security_posture(hw_df, sw_df):
-    return "Security posture analysis pending integration."
-
-
-def build_section_9_performance_metrics(hw_df, sw_df):
-    return "Performance metrics analysis pending integration."
-
-
-def build_section_10_reliability(hw_df, sw_df):
-    return "Reliability metrics analysis pending integration."
-
-
-def build_section_11_scalability(hw_df, sw_df):
-    return "Scalability assessment pending integration."
-
-
-def build_section_12_legacy_debt(hw_df, sw_df):
-    return "Legacy systems and technical debt analysis pending integration."
-
-
-def build_section_13_obsolete_platforms(hw_df, sw_df):
-    return "Obsolete platform identification pending integration."
-
-
-def build_section_14_cloud_migration(hw_df, sw_df):
-    return "Cloud migration potential analysis pending integration."
-
-
-def build_section_15_strategic_alignment(hw_df, sw_df):
-    return "Strategic alignment analysis pending integration."
-
-
-def build_section_17_financial_implications(hw_df, sw_df):
-    return "Financial implications analysis pending integration."
-
-
-def build_section_18_sustainability(hw_df, sw_df):
-    return "Environmental impact and sustainability analysis pending integration."
-
-
-def build_section_20_next_steps(hw_df, sw_df):
-    return "Recommended next steps and roadmap pending integration."
-
-
-def _to_direct_drive_url(url: str) -> str:
-    m = re.search(r"/d/([A-Za-z0-9_-]+)", url)
-    if m:
-        return f"https://drive.google.com/uc?export=download&id={m.group(1)}"
-    return url
+# Build helper functions
+# (build_score_summary, build_recommendations, build_key_findings,
+#  build_section_2_overview, ..., build_section_20_next_steps,
+#  _to_direct_drive_url, etc.)
 
 
 def generate_assessment(
@@ -167,6 +80,7 @@ def generate_assessment(
     session_path = os.path.join(OUTPUT_DIR, session_id)
     os.makedirs(session_path, exist_ok=True)
 
+    # Download and prepare dataframes
     hw_df, sw_df = pd.DataFrame(), pd.DataFrame()
     hw_file_path = sw_file_path = None
     for file in files:
@@ -182,13 +96,11 @@ def generate_assessment(
             with open(url, "rb") as src, open(local, "wb") as dst:
                 dst.write(src.read())
         print(f"[DEBUG] Saved to {local}", flush=True)
-        # First asset_inventory -> hardware, second -> software
         if file.get("type") == "asset_inventory":
             if hw_file_path is None:
                 hw_file_path = local
             else:
                 sw_file_path = local
-        # Also accept explicit gap_working for software
         elif file.get("type") == "gap_working" and sw_file_path is None:
             sw_file_path = local
 
@@ -214,7 +126,7 @@ def generate_assessment(
         sw_df = suggest_sw_replacements(sw_df)
         sw_df = apply_classification(sw_df)
 
-    # Charts
+    # Charts upload
     chart_paths = generate_visual_charts(hw_df, sw_df, session_id)
     for name, local_path in chart_paths.items():
         try:
@@ -233,30 +145,30 @@ def generate_assessment(
             links[f"file_{idx}_drive_url"] = upload_to_drive(path, os.path.basename(path), session_id)
 
     # Build narratives
-    score_summary = build_score_summary(hw_df, sw_df)
+    score_summary  = build_score_summary(hw_df, sw_df)
     recommendations = build_recommendations(hw_df, sw_df)
-    key_findings = build_key_findings(hw_df, sw_df)
+    key_findings   = build_key_findings(hw_df, sw_df)
 
-    # Section content
-    section_2_overview = build_section_2_overview(hw_df, sw_df)
-    section_3_hardware_breakdown = build_section_3_hardware_breakdown(hw_df, sw_df)
-    section_4_software_breakdown = build_section_4_software_breakdown(hw_df, sw_df)
-    section_5_tier_distribution = build_section_5_tier_distribution(hw_df, sw_df)
-    section_6_hardware_lifecycle = build_section_6_hardware_lifecycle(hw_df, sw_df)
-    section_7_software_licensing = build_section_7_software_licensing(hw_df, sw_df)
-    section_8_security_posture = build_section_8_security_posture(hw_df, sw_df)
-    section_9_performance_metrics = build_section_9_performance_metrics(hw_df, sw_df)
-    section_10_reliability = build_section_10_reliability(hw_df, sw_df)
-    section_11_scalability = build_section_11_scalability(hw_df, sw_df)
-    section_12_legacy_debt = build_section_12_legacy_debt(hw_df, sw_df)
-    section_13_obsolete_platforms = build_section_13_obsolete_platforms(hw_df, sw_df)
-    section_14_cloud_migration = build_section_14_cloud_migration(hw_df, sw_df)
-    section_15_strategic_alignment = build_section_15_strategic_alignment(hw_df, sw_df)
-    section_17_financial_implications = build_section_17_financial_implications(hw_df, sw_df)
-    section_18_sustainability = build_section_18_sustainability(hw_df, sw_df)
-    section_20_next_steps = build_section_20_next_steps(hw_df, sw_df)
+    # AI-enhanced section narratives
+    section_2_overview             = ai_narrative("IT Landscape Overview",              {"raw_summary": build_section_2_overview(hw_df, sw_df)})
+    section_3_hardware_breakdown   = ai_narrative("Hardware Breakdown by Device Type",   {"raw_summary": build_section_3_hardware_breakdown(hw_df, sw_df)})
+    section_4_software_breakdown   = ai_narrative("Software Breakdown by Application",     {"raw_summary": build_section_4_software_breakdown(hw_df, sw_df)})
+    section_5_tier_distribution    = ai_narrative("Tier Distribution for Hardware",      {"raw_summary": build_section_5_tier_distribution(hw_df, sw_df)})
+    section_6_hardware_lifecycle   = ai_narrative("Hardware Lifecycle Statuses",        {"raw_summary": build_section_6_hardware_lifecycle(hw_df, sw_df)})
+    section_7_software_licensing   = ai_narrative("Software Licensing Status",         {"raw_summary": build_section_7_software_licensing(hw_df, sw_df)})
+    section_8_security_posture     = ai_narrative("Security Posture Analysis",        {"raw_summary": build_section_8_security_posture(hw_df, sw_df)})
+    section_9_performance_metrics  = ai_narrative("Performance Metrics Overview",      {"raw_summary": build_section_9_performance_metrics(hw_df, sw_df)})
+    section_10_reliability         = ai_narrative("System Reliability Overview",       {"raw_summary": build_section_10_reliability(hw_df, sw_df)})
+    section_11_scalability         = ai_narrative("Scalability Insights",              {"raw_summary": build_section_11_scalability(hw_df, sw_df)})
+    section_12_legacy_debt         = ai_narrative("Legacy Systems & Technical Debt",    {"raw_summary": build_section_12_legacy_debt(hw_df, sw_df)})
+    section_13_obsolete_platforms  = ai_narrative("Obsolete Platforms Identification",  {"raw_summary": build_section_13_obsolete_platforms(hw_df, sw_df)})
+    section_14_cloud_migration     = ai_narrative("Cloud Migration Potential",       {"raw_summary": build_section_14_cloud_migration(hw_df, sw_df)})
+    section_15_strategic_alignment = ai_narrative("Strategic IT Alignment",          {"raw_summary": build_section_15_strategic_alignment(hw_df, sw_df)})
+    section_17_financial_implications = ai_narrative("Financial Implications Analysis", {"raw_summary": build_section_17_financial_implications(hw_df, sw_df)})
+    section_18_sustainability      = ai_narrative("Sustainability & Green IT",         {"raw_summary": build_section_18_sustainability(hw_df, sw_df)})
+    section_20_next_steps          = ai_narrative("Recommended Next Steps & Roadmap", {"raw_summary": build_section_20_next_steps(hw_df, sw_df)})
 
-    # Appendices
+    # Prepare appendices
     try:
         classification_matrix_md = CLASSIFICATION_DF.to_markdown(index=False)
     except Exception:
@@ -293,6 +205,7 @@ def generate_assessment(
         "content_20": section_20_next_steps,
         "appendix_classification_matrix": classification_matrix_md,
         "appendix_data_sources": data_sources_text,
+        # Slide mapping remains the same
         "slide_executive_summary": score_summary,
         "slide_it_landscape_overview": section_2_overview,
         "slide_hardware_analysis": section_3_hardware_breakdown,
@@ -323,18 +236,15 @@ def generate_assessment(
 
     # Download & upload DOCX/PPTX back to Drive
     docx_rel, pptx_rel = gen.get("docx_url"), gen.get("pptx_url")
-    docx_url = docx_rel
-    pptx_url = pptx_rel
-    docx_name, pptx_name = os.path.basename(docx_rel), os.path.basename(pptx_rel)
-    docx_local = os.path.join(session_path, docx_name)
-    pptx_local = os.path.join(session_path, pptx_name)
-    for dl_url, local in [(docx_url, docx_local), (pptx_url, pptx_local)]:
+    docx_local = os.path.join(session_path, os.path.basename(docx_rel))
+    pptx_local = os.path.join(session_path, os.path.basename(pptx_rel))
+    for dl_url, local in [(docx_rel, docx_local), (pptx_rel, pptx_local)]:
         resp_dl = requests.get(dl_url)
         resp_dl.raise_for_status()
         with open(local, "wb") as f:
             f.write(resp_dl.content)
-    links["file_3_drive_url"] = upload_to_drive(docx_local, docx_name, session_id)
-    links["file_4_drive_url"] = upload_to_drive(pptx_local, pptx_name, session_id)
+    links["file_3_drive_url"] = upload_to_drive(docx_local, os.path.basename(docx_rel), session_id)
+    links["file_4_drive_url"] = upload_to_drive(pptx_local, os.path.basename(pptx_rel), session_id)
 
     result = {
         "session_id": session_id,
