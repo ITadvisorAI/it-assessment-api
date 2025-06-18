@@ -79,7 +79,7 @@ def generate_assessment(session_id, email, goal, files, next_action_webhook="", 
     sw_suggestions = suggest_sw_replacements(sw_df) if not sw_df.empty else []
 
     # Generate visual charts and upload to Drive
-    chart_paths = generate_visual_charts(hw_df, sw_df, output_dir=session_path)
+    chart_paths = generate_visual_charts(hw_df, sw_df, session_path)
     chart_urls = []
     for path in chart_paths:
         drive_url = upload_to_drive(path, folder_id)
@@ -124,7 +124,6 @@ def generate_assessment(session_id, email, goal, files, next_action_webhook="", 
 
 
 def process_assessment(payload):
-    # Unpack payload dict to function parameters
     return generate_assessment(
         session_id=payload.get('session_id'),
         email=payload.get('email'),
