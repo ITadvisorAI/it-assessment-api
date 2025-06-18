@@ -122,6 +122,9 @@ def generate_assessment(session_id, email, goal, files, next_action_webhook="", 
     print(f"[DEBUG] Market Gap API responded with status {response.status_code}", flush=True)
     return response.json()
 
+# For backward compatibility with app.py import
+process_assessment = generate_assessment
+
 
 def main():
     import sys
