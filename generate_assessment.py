@@ -155,6 +155,7 @@ def ai_narrative(section_name: str, summary: dict) -> str:
             chunked_summary = summary.copy()
             chunked_summary[largest_key] = sublist
             label = f" (chunk {i//chunk_size+1})" if total > chunk_size else ""
+            # Fixed multiline f-string with explicit newline
             user_content = f"Section: {section_name}{label}
 Data: {json.dumps(chunked_summary)}"
             messages = [
@@ -177,6 +178,7 @@ Data: {json.dumps(chunked_summary)}"
                     temperature=0.3
                 )
             narratives.append(resp.choices[0].message.content.strip())
+        # Proper join with two newlines
         return "
 
 ".join(narratives)
