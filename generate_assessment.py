@@ -28,24 +28,10 @@ def build_score_summary(hw_df, sw_df):
 
 
 def build_section_2_overview(hw_df, sw_df):
-    """
-    Provides an overview of the IT landscape, handling missing columns safely.
-    """
     total_devices = len(hw_df)
     total_applications = len(sw_df)
-
-    # Compute healthy devices if the score column exists
-    if "Tier Total Score" in hw_df.columns:
-        healthy_devices = int((hw_df["Tier Total Score"] >= 75).sum())
-    else:
-        healthy_devices = 0
-
-    # Compute compliant licenses if the license column exists
-    if "License Status" in sw_df.columns:
-        compliant_licenses = int((sw_df["License Status"] != "Expired").sum())
-    else:
-        compliant_licenses = 0
-
+    healthy_devices = int((hw_df["Tier Total Score"] >= 75).sum()) if "Tier Total Score" in hw_df.columns else 0
+    compliant_licenses = int((sw_df["License Status"] != "Expired").sum()) if "License Status" in sw_df.columns else 0
     return {
         "total_devices": total_devices,
         "total_applications": total_applications,
@@ -63,7 +49,7 @@ def build_section_4_inventory_software(hw_df, sw_df):
 
 
 def build_section_5_classification_distribution(hw_df, sw_df):
-    dist = hw_df.get("Category", pd.Series()).value_counts().to_dict() if "Category" in hw_df.columns else {}
+    dist = hw_df["Category"].value_counts().to_dict() if "Category" in hw_df.columns else {}
     return {"classification_distribution": dist}
 
 
@@ -72,8 +58,11 @@ def build_section_6_lifecycle_status(hw_df, sw_df):
 
 
 def build_section_7_software_compliance(hw_df, sw_df):
-    compliant = sw_df[sw_df.get("License Status") != "Expired"].shape[0] if "License Status" in sw_df.columns else 0
-    expired = sw_df[sw_df.get("License Status") == "Expired"].shape[0] if "License Status" in sw_df.columns else 0
+    if "License Status" in sw_df.columns:
+        compliant = int((sw_df["License Status"] != "Expired").sum())
+        expired = int((sw_df["License Status"] == "Expired").sum())
+    else:
+        compliant, expired = 0, 0
     return {"compliant_count": compliant, "expired_count": expired}
 
 
@@ -99,11 +88,11 @@ def build_section_12_legacy_technical_debt(hw_df, sw_df):
 
 def build_section_13_obsolete_risk(hw_df, sw_df):
     risks = []
-    if not hw_df.empty:
-        high_risk_hw = hw_df[hw_df.get("Tier Total Score", 0) < 30]
+    if "Tier Total Score" in hw_df.columns:
+        high_risk_hw = hw_df[hw_df["Tier Total Score"] < 30]
         risks.append({"hardware": high_risk_hw.to_dict(orient="records")})
-    if not sw_df.empty:
-        high_risk_sw = sw_df[sw_df.get("Tier Total Score", 0) < 30]
+    if "Tier Total Score" in sw_df.columns:
+        high_risk_sw = sw_df[sw_df["Tier Total Score"] < 30]
         risks.append({"software": high_risk_sw.to_dict(orient="records")})
     return {"risks": risks}
 
@@ -128,6 +117,10 @@ def build_section_18_environmental_sustainability(hw_df, sw_df):
     return {"environmental_sustainability": []}
 
 
+def build_section_8_action_items(hw_df, sw_df):
+    return {"action_items": []}
+
+
 def build_recommendations(hw_df, sw_df):
     hw_recs = suggest_hw_replacements(hw_df).head(3).to_dict(orient="records") if not hw_df.empty else []
     sw_recs = suggest_sw_replacements(sw_df).head(3).to_dict(orient="records") if not sw_df.empty else []
@@ -142,10 +135,9 @@ def ai_narrative(section_name: str, summary: dict) -> str:
     """
     Generate a narrative in manageable chunks to avoid rate-limit errors by splitting the largest list in the summary.
     """
-    # Identify list entries for potential chunking
+    # Identify list entries
     list_items = [(k, v) for k, v in summary.items() if isinstance(v, list)]
     if list_items:
-        # Choose the largest list to chunk
         largest_key, largest_list = max(list_items, key=lambda x: len(x[1]))
         total = len(largest_list)
         chunk_size = 20
@@ -155,13 +147,11 @@ def ai_narrative(section_name: str, summary: dict) -> str:
             chunked_summary = summary.copy()
             chunked_summary[largest_key] = sublist
             label = f" (chunk {i//chunk_size+1})" if total > chunk_size else ""
-            # Fixed multiline f-string with explicit newline
-            user_content = f"Section: {section_name}{label}
-Data: {json.dumps(chunked_summary)}"
+            user_content = f"Section: {section_name}{label}\nData: {json.dumps(chunked_summary)}"
             messages = [
                 {"role": "system", "content": (
                     "You are a senior IT transformation advisor. "
-                    "Given the data summary, write a concise, professional narrative for the report section."
+                    "Given the data summary, write a concise narrative for the section."
                 )},
                 {"role": "user", "content": user_content}
             ]
@@ -178,17 +168,12 @@ Data: {json.dumps(chunked_summary)}"
                     temperature=0.3
                 )
             narratives.append(resp.choices[0].message.content.strip())
-        # Proper join with two newlines
-        return "
-
-".join(narratives)
-    # No lists to chunk: send full summary
-    user_content = f"Section: {section_name}
-Data: {json.dumps(summary)}"
+        return "\n\n".join(narratives)
+    user_content = f"Section: {section_name}\nData: {json.dumps(summary)}"
     messages = [
         {"role": "system", "content": (
             "You are a senior IT transformation advisor. "
-            "Given the data summary, write a concise, professional narrative for the report section."
+            "Given the data summary, write a concise narrative for the section."
         )},
         {"role": "user", "content": user_content}
     ]
@@ -205,118 +190,58 @@ Data: {json.dumps(summary)}"
             temperature=0.3
         )
     return resp.choices[0].message.content.strip()
-def generate_assessment(session_id: str, email: str, goal: str, files: list, next_action_webhook: str, folder_id: str) -> dict:
-    # Prepare dataframes
-    hw_df, sw_df = pd.DataFrame(), pd.DataFrame()
-    session_path = f"./{session_id}"
-    os.makedirs(session_path, exist_ok=True)
 
-    # Download and classify files
+
+def generate_assessment(session_id: str, email: str, goal: str, files: list, next_action_webhook: str, folder_id: str) -> dict:
+    hw_df, sw_df = pd.DataFrame(), pd.DataFrame()
+    session_path = f"./{session_id}"; os.makedirs(session_path, exist_ok=True)
     for f in files:
         name, url = f['file_name'], f['file_url']
         local = os.path.join(session_path, name)
         try:
-            r = requests.get(url); r.raise_for_status()
-            with open(local, 'wb') as fl: fl.write(r.content)
+            r = requests.get(url); r.raise_for_status(); open(local,'wb').write(r.content)
             df_temp = pd.read_excel(local)
         except Exception as e:
-            print(f"⚠️ Error reading {name}: {e}", flush=True)
-            continue
-        cols = set(c.lower() for c in df_temp.columns)
-        provided = f.get('type','').lower()
-        if provided=='asset_inventory' and {'device id','device name'}<=cols:
-            hw_df = pd.concat([hw_df, df_temp], ignore_index=True)
-        elif provided=='asset_inventory' and {'app id','app name'}<=cols:
-            sw_df = pd.concat([sw_df, df_temp], ignore_index=True)
-        elif provided in ('hardware_inventory','asset_hardware') or {'device id','device name'}<=cols:
-            hw_df = pd.concat([hw_df, df_temp], ignore_index=True)
-        else:
-            sw_df = pd.concat([sw_df, df_temp], ignore_index=True)
-
-    # Enrich & classify
+            print(f"⚠️ Error reading {name}: {e}", flush=True); continue
+        cols = set(c.lower() for c in df_temp.columns); t=f.get('type','').lower()
+        if t=='asset_inventory' and {'device id','device name'}<=cols: hw_df=pd.concat([hw_df,df_temp],ignore_index=True)
+        elif t=='asset_inventory' and {'app id','app name'}<=cols: sw_df=pd.concat([sw_df,df_temp],ignore_index=True)
+        elif t in ('hardware_inventory','asset_hardware') or {'device id','device name'}<=cols: hw_df=pd.concat([hw_df,df_temp],ignore_index=True)
+        else: sw_df=pd.concat([sw_df,df_temp],ignore_index=True)
     if not hw_df.empty:
-        hw_df = suggest_hw_replacements(pd.concat([HW_BASE_DF, hw_df], ignore_index=True))
-        hw_df = hw_df.merge(CLASSIFICATION_DF, how='left', left_on='Tier Total Score', right_on='Score')
+        hw_df=suggest_hw_replacements(pd.concat([HW_BASE_DF,hw_df],ignore_index=True))
+        hw_df=hw_df.merge(CLASSIFICATION_DF,how='left',left_on='Tier Total Score',right_on='Score')
     if not sw_df.empty:
-        sw_df = suggest_sw_replacements(pd.concat([SW_BASE_DF, sw_df], ignore_index=True))
-        sw_df = sw_df.merge(CLASSIFICATION_DF, how='left', left_on='Tier Total Score', right_on='Score')
-
-    # Generate charts
-    uploaded_charts = generate_visual_charts(hw_df, sw_df, session_path)
-
-    # Build narratives
-    section_funcs = [
-        build_score_summary, build_section_2_overview, build_section_3_inventory_hardware,
-        build_section_4_inventory_software, build_section_5_classification_distribution,
-        build_section_6_lifecycle_status, build_section_7_software_compliance,
-        build_section_8_security_posture, build_section_9_performance,
-        build_section_10_reliability, build_section_11_scalability,
-        build_section_12_legacy_technical_debt, build_section_13_obsolete_risk,
-        build_section_14_cloud_migration, build_section_15_strategic_alignment,
-        build_section_16_business_impact, build_section_17_financial_implications,
-        build_section_18_environmental_sustainability, build_recommendations,
-        build_section_20_next_steps
-    ]
-    narratives = {f"content_{i+1}": ai_narrative(func.__name__, func(hw_df, sw_df))
-                  for i, func in enumerate(section_funcs)}
-
-    payload = {
-        'session_id': session_id,
-        'email': email,
-        'goal': goal,
-        **uploaded_charts,
-        **narratives
-    }
-
-    # Send to DOCX generator
-    try:
-        resp_docx = requests.post(f"{DOCX_SERVICE_URL}/generate_docx", json=payload)
-        resp_docx.raise_for_status()
-        docx_url = resp_docx.json().get('file_url')
-    except Exception as e:
-        print(f"⚠️ Docx gen failed: {e}", flush=True)
-        docx_url = ''
-
-    # Send to PPTX generator
-    try:
-        resp_pptx = requests.post(f"{DOCX_SERVICE_URL}/generate_pptx", json=payload)
-        resp_pptx.raise_for_status()
-        pptx_url = resp_pptx.json().get('file_url')
-    except Exception as e:
-        print(f"⚠️ Pptx gen failed: {e}", flush=True)
-        pptx_url = ''
-
-    # Upload to Drive
-    file_links = {}
-    if docx_url:
-        fname = os.path.basename(docx_url)
-        local_doc = os.path.join(session_path, fname)
-        r = requests.get(docx_url); r.raise_for_status()
-        with open(local_doc, 'wb') as fl: fl.write(r.content)
-        file_links['file_9_drive_url'] = upload_to_drive(local_doc, fname, folder_id)
-    if pptx_url:
-        fname = os.path.basename(pptx_url)
-        local_ppt = os.path.join(session_path, fname)
-        r = requests.get(pptx_url); r.raise_for_status()
-        with open(local_ppt, 'wb') as fl: fl.write(r.content)
-        file_links['file_10_drive_url'] = upload_to_drive(local_ppt, fname, folder_id)
-
-    # Notify market-gap
-    final_payload = {'session_id': session_id, 'gpt_module': 'it_assessment', 'status': 'complete', **file_links}
-    try:
-        requests.post(next_action_webhook or MARKET_GAP_WEBHOOK, json=final_payload).raise_for_status()
-    except Exception as e:
-        print(f"⚠️ Market-gap notify failed: {e}", flush=True)
-
+        sw_df=suggest_sw_replacements(pd.concat([SW_BASE_DF,sw_df],ignore_index=True))
+        sw_df=sw_df.merge(CLASSIFICATION_DF,how='left',left_on='Tier Total Score',right_on='Score')
+    uploaded_charts=generate_visual_charts(hw_df,sw_df,session_path)
+    section_funcs=[build_score_summary,build_section_2_overview,build_section_3_inventory_hardware,build_section_4_inventory_software,
+                   build_section_5_classification_distribution,build_section_6_lifecycle_status,build_section_7_software_compliance,
+                   build_section_8_security_posture,build_section_9_performance,build_section_10_reliability,
+                   build_section_11_scalability,build_section_12_legacy_technical_debt,build_section_13_obsolete_risk,
+                   build_section_14_cloud_migration,build_section_15_strategic_alignment,build_section_16_business_impact,
+                   build_section_17_financial_implications,build_section_18_environmental_sustainability,build_recommendations,
+                   build_section_20_next_steps]
+    narratives={f"content_{i+1}":ai_narrative(func.__name__,func(hw_df,sw_df)) for i,func in enumerate(section_funcs)}
+    payload={"session_id":session_id,"email":email,"goal":goal,**uploaded_charts,**narratives}
+    try:resp_docx=requests.post(f"{DOCX_SERVICE_URL}/generate_docx",json=payload);resp_docx.raise_for_status();docx_url=resp_docx.json().get('file_url')
+    except Exception as e:print(f"⚠️ Docx gen failed: {e}",flush=True);docx_url=''
+    try:resp_pptx=requests.post(f"{DOCX_SERVICE_URL}/generate_pptx",json=payload);resp_pptx.raise_for_status();pptx_url=resp_pptx.json().get('file_url')
+    except Exception as e:print(f"⚠️ Pptx gen failed: {e}",flush=True);pptx_url=''
+    file_links={}
+    if docx_url:fname=os.path.basename(docx_url);local_doc=os.path.join(session_path,fname);r=requests.get(docx_url);r.raise_for_status();open(local_doc,'wb').write(r.content);file_links['file_9_drive_url']=upload_to_drive(local_doc,fname,folder_id)
+    if pptx_url:fname=os.path.basename(pptx_url);local_ppt=os.path.join(session_path,fname);r=requests.get(pptx_url);r.raise_for_status();open(local_ppt,'wb').write(r.content);file_links['file_10_drive_url']=upload_to_drive(local_ppt,fname,folder_id)
+    final_payload={'session_id':session_id,'gpt_module':'it_assessment','status':'complete',**file_links}
+    try:requests.post(next_action_webhook or MARKET_GAP_WEBHOOK,json=final_payload).raise_for_status()
+    except Exception as e:print(f"⚠️ Market-gap notify failed: {e}",flush=True)
     return final_payload
-
 
 def process_assessment(data: dict) -> dict:
     return generate_assessment(
         session_id=data.get('session_id'),
         email=data.get('email'),
-        goal=data.get('goal', ''),
-        files=data.get('files', []),
-        next_action_webhook=data.get('next_action_webhook', ''),
-        folder_id=data.get('folder_id', '')
+        goal=data.get('goal',''),
+        files=data.get('files',[]),
+        next_action_webhook=data.get('next_action_webhook',''),
+        folder_id=data.get('folder_id','')
     )
