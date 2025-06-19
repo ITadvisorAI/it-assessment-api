@@ -41,11 +41,11 @@ def build_section_2_overview(hw_df, sw_df):
 
 
 def build_section_3_inventory_hardware(hw_df, sw_df):
-    return {"hardware_items": hw_df.to_dict(orient="records")}  # stub: list all hardware
+    return {"hardware_items": hw_df.to_dict(orient="records")}
 
 
 def build_section_4_inventory_software(hw_df, sw_df):
-    return {"software_items": sw_df.to_dict(orient="records")}  # stub: list all software
+    return {"software_items": sw_df.to_dict(orient="records")}
 
 
 def build_section_5_classification_distribution(hw_df, sw_df):
@@ -54,7 +54,6 @@ def build_section_5_classification_distribution(hw_df, sw_df):
 
 
 def build_section_6_lifecycle_status(hw_df, sw_df):
-    # stub: summarize lifecycle if available
     return {"lifecycle_status": []}
 
 
@@ -65,32 +64,26 @@ def build_section_7_software_compliance(hw_df, sw_df):
 
 
 def build_section_8_security_posture(hw_df, sw_df):
-    # stub
     return {"vulnerabilities": []}
 
 
 def build_section_9_performance(hw_df, sw_df):
-    # stub
     return {"performance_metrics": []}
 
 
 def build_section_10_reliability(hw_df, sw_df):
-    # stub
     return {"reliability_metrics": []}
 
 
 def build_section_11_scalability(hw_df, sw_df):
-    # stub
     return {"scalability_opportunities": []}
 
 
 def build_section_12_legacy_technical_debt(hw_df, sw_df):
-    # stub
     return {"legacy_issues": []}
 
 
 def build_section_13_obsolete_risk(hw_df, sw_df):
-    # Inline risk logic instead of importing non-existent function
     risks = []
     if not hw_df.empty:
         high_risk_hw = hw_df[hw_df.get("Tier Total Score", 0) < 30]
@@ -102,27 +95,22 @@ def build_section_13_obsolete_risk(hw_df, sw_df):
 
 
 def build_section_14_cloud_migration(hw_df, sw_df):
-    # stub
     return {"cloud_migration": []}
 
 
 def build_section_15_strategic_alignment(hw_df, sw_df):
-    # stub
     return {"alignment": []}
 
 
 def build_section_16_business_impact(hw_df, sw_df):
-    # stub
     return {"business_impact": []}
 
 
 def build_section_17_financial_implications(hw_df, sw_df):
-    # stub
     return {"financial_implications": []}
 
 
 def build_section_18_environmental_sustainability(hw_df, sw_df):
-    # stub
     return {"environmental_sustainability": []}
 
 
@@ -171,7 +159,7 @@ def ai_narrative(section_name: str, summary: dict) -> str:
             f"Data: {json.dumps(summary)}"
         )}
     ]
-    resp = openai.ChatCompletion.create(
+    resp = openai.chat.completions.create(
         model="gpt-4o-mini",
         messages=messages,
         temperature=0.3
@@ -180,21 +168,18 @@ def ai_narrative(section_name: str, summary: dict) -> str:
 
 
 def generate_assessment(session_id: str, email: str, goal: str, files: list, next_action_webhook: str, folder_id: str) -> dict:
-    # Prepare dataframes
     hw_df = pd.DataFrame()
     sw_df = pd.DataFrame()
     session_path = f"./{session_id}"
     os.makedirs(session_path, exist_ok=True)
 
-    # Download, read, and classify files
     for f in files:
         name = f.get('file_name')
         url = f.get('file_url')
         local_path = os.path.join(session_path, name)
         try:
             r = requests.get(url); r.raise_for_status()
-            with open(local_path, 'wb') as fl:
-                fl.write(r.content)
+            with open(local_path, 'wb') as fl: fl.write(r.content)
             df_temp = pd.read_excel(local_path)
         except Exception as e:
             print(f"⚠️ Error downloading or reading {name}: {e}", flush=True)
@@ -202,7 +187,6 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
 
         cols = {c.lower() for c in df_temp.columns}
         provided = f.get('type', '').lower()
-        # Refined type inference
         if provided == 'asset_inventory':
             lname = name.lower()
             if 'server' in lname or 'hardware' in lname or {'device id','device name'}.issubset(cols):
@@ -218,7 +202,6 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
         else:
             hw_df = pd.concat([hw_df, df_temp], ignore_index=True) if not hw_df.empty else df_temp
 
-    # Enrich & classify
     if not hw_df.empty:
         merged_hw = pd.concat([HW_BASE_DF, hw_df], ignore_index=True)
         hw_df = suggest_hw_replacements(merged_hw)
@@ -228,10 +211,8 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
         sw_df = suggest_sw_replacements(merged_sw)
         sw_df = sw_df.merge(CLASSIFICATION_DF, how='left', left_on='Tier Total Score', right_on='Score')
 
-    # Generate and upload charts
     uploaded_charts = generate_visual_charts(hw_df, sw_df, session_path)
 
-    # Prepare content sections for narrative
     sections = {
         'Executive Summary': build_score_summary(hw_df, sw_df),
         'Organization IT Landscape Overview': build_section_2_overview(hw_df, sw_df),
@@ -257,7 +238,6 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
     narratives = {f"content_{i+1}": ai_narrative(name, summary)
                   for i,(name,summary) in enumerate(sections.items())}
 
-    # Build payload for both docx and pptx
     payload = {
         'session_id': session_id,
         'email': email,
@@ -267,9 +247,8 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
     }
 
     file_links = {}
-    # Generate DOCX
     try:
-        resp_docx = requests.post(f"{DOCX_SERVICE_URL}/generate_docx", json=payload)
+        resp_docx = requests.post(f"{DOCXX_SERVICE_URL}/generate_docx", json=payload)
         resp_docx.raise_for_status()
         docx_url = resp_docx.json().get('file_url')
         if docx_url:
@@ -281,7 +260,6 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
     except Exception as e:
         print(f"⚠️ Docx generation failed: {e}", flush=True)
 
-    # Generate PPTX
     try:
         resp_pptx = requests.post(f"{DOCX_SERVICE_URL}/generate_pptx", json=payload)
         resp_pptx.raise_for_status()
@@ -295,13 +273,11 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
     except Exception as e:
         print(f"⚠️ Pptx generation failed: {e}", flush=True)
 
-    # Notify next module (Market Gap)
     final_payload = {'session_id': session_id, 'gpt_module': 'it_assessment', 'status': 'complete', **file_links}
     webhook = next_action_webhook or MARKET_GAP_WEBHOOK
     try:
         response = requests.post(webhook, json=final_payload)
         response.raise_for_status()
-        print(f"[DEBUG] Notified market-gap module at {webhook}", flush=True)
     except Exception as e:
         print(f"⚠️ Failed to notify market-gap webhook ({webhook}): {e}", flush=True)
 
