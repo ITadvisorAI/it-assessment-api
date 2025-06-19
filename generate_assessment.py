@@ -19,7 +19,10 @@ CLASSIFICATION_DF = pd.DataFrame([
 
 # Service endpoints (env var overrides available)
 DOCX_SERVICE_URL = os.getenv("DOCX_SERVICE_URL", "https://docx-generator-api.onrender.com")
-MARKET_GAP_WEBHOOK = os.getenv("MARKET_GAP_WEBHOOK", "https://market-gap-analysis.onrender.com/start_market_gap")
+MARKET_GAP_WEBHOOK = os.getenv(
+    "MARKET_GAP_WEBHOOK",
+    "https://market-gap-analysis.onrender.com/start_market_gap"
+)
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/tmp")
 
 # Initialize OpenAI client
@@ -29,7 +32,6 @@ client = openai.OpenAI()
 
 def build_score_summary(hw_df, sw_df):
     return {"text": f"Analyzed {len(hw_df)} hardware items and {len(sw_df)} software items."}
-
 
 def build_section_2_overview(hw_df, sw_df):
     total_devices = len(hw_df)
@@ -43,7 +45,6 @@ def build_section_2_overview(hw_df, sw_df):
         "compliant_licenses": compliant_licenses
     }
 
-
 def build_section_3_risk(hw_df, sw_df):
     risks = []
     if not hw_df.empty:
@@ -54,12 +55,10 @@ def build_section_3_risk(hw_df, sw_df):
         risks.append({"software": high_risk_sw.to_dict(orient="records")})
     return {"risks": risks}
 
-
 def build_recommendations(hw_df, sw_df):
     hw_recs = suggest_hw_replacements(hw_df).head(3).to_dict(orient="records") if not hw_df.empty else []
     sw_recs = suggest_sw_replacements(sw_df).head(3).to_dict(orient="records") if not sw_df.empty else []
     return {"hardware_replacements": hw_recs, "software_replacements": sw_recs}
-
 
 def build_key_findings(hw_df, sw_df):
     findings = []
@@ -71,17 +70,14 @@ def build_key_findings(hw_df, sw_df):
         findings.append({"text": f"{len(expired)} expired software licenses", "severity": "Critical"})
     return {"findings": findings}
 
-
 def build_section_6_distribution(hw_df, sw_df):
     return {
         "hardware_distribution": hw_df["Category"].value_counts().to_dict() if "Category" in hw_df.columns else {},
         "software_distribution": sw_df["Category"].value_counts().to_dict() if "Category" in sw_df.columns else {}
     }
 
-
 def build_section_7_trend_analysis(hw_df, sw_df):
     return {"trends": []}
-
 
 def build_section_8_action_items(hw_df, sw_df):
     return {"action_items": []}
@@ -195,7 +191,7 @@ def generate_assessment(
     narratives = {f"content_{i}": ai_narrative(sec.replace('_',' '), summary)
                   for i,(sec,summary) in enumerate(sections.items(), start=1)}
 
-    # Construct full payload
+    # Construct full payload for Docx API
     payload = {
         'session_id': session_id,
         'email': email,
@@ -220,15 +216,32 @@ def generate_assessment(
             with open(local_doc, 'wb') as fl: fl.write(r.content)
             file_links[link_key] = upload_to_drive(local_doc, fname, upload_folder)
 
-    # Notify next module
+    # Notify next module (Market Gap)
     final_payload = { 'session_id': session_id, 'gpt_module': 'it_assessment', 'status': 'complete', **file_links }
     webhook = next_action_webhook or MARKET_GAP_WEBHOOK
     try:
         response = requests.post(webhook, json=final_payload)
         response.raise_for_status()
-        print(f"[DEBUG] Successfully notified market-gap module at {webhook}", flush=True)
+        print(f"[DEBUG] Notified market-gap module at {webhook}", flush=True)
     except Exception as e:
         print(f"⚠️ Failed to notify market-gap webhook ({webhook}): {e}", flush=True)
+
+    # Notify GPT1 (user-facing status update)
+    if next_action_webhook:
+        status_payload = {
+            'session_id': session_id,
+            'update_type': 'status',
+            'message': (
+                '✅ Current-Status Assessment is complete. '
+                'Proceeding to the Market Gap Analysis module…'
+            )
+        }
+        try:
+            resp2 = requests.post(next_action_webhook, json=status_payload)
+            resp2.raise_for_status()
+            print(f"[DEBUG] Sent status update to GPT1: {status_payload['message']}", flush=True)
+        except Exception as e:
+            print(f"⚠️ Failed to send status update to GPT1: {e}", flush=True)
 
     return final_payload
 
