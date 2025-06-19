@@ -17,14 +17,14 @@ CLASSIFICATION_DF = pd.DataFrame([
     {"Score": 90, "Category": "Low"}
 ])
 
-# Service endpoints (env var overrides available)
+# Service endpoints
 DOCX_SERVICE_URL = os.getenv("DOCX_SERVICE_URL", "https://docx-generator-api.onrender.com")
 MARKET_GAP_WEBHOOK = os.getenv("MARKET_GAP_WEBHOOK", "https://market-gap-analysis.onrender.com/start_market_gap")
 
 # Section builder functions
 
 def build_score_summary(hw_df, sw_df):
-    return {"text": f"Analyzed {len(hw_df)} hardware items and {len(sw_df)} software items."}
+    return {"text": f"Analyzed {len(hw_df)} hardware items and {len(sw_df)} software items."
 
 
 def build_section_2_overview(hw_df, sw_df):
@@ -149,22 +149,42 @@ def build_section_8_action_items(hw_df, sw_df):
 
 
 def ai_narrative(section_name: str, summary: dict) -> str:
-    messages = [
-        {"role": "system", "content": (
-            "You are a senior IT transformation advisor. "
-            "Given the data summary, write a concise, professional narrative for the report section."
-        )},
-        {"role": "user", "content": (
-            f"Section: {section_name}\n"
-            f"Data: {json.dumps(summary)}"
-        )}
-    ]
-    resp = openai.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=messages,
-        temperature=0.3
-    )
-    return resp.choices[0].message.content.strip()
+    """
+    Generate a narrative in chunks to avoid rate-limit errors.
+    """
+    # Split summary into chunks of ~50 items each
+    items = list(summary.items())
+    narratives = []
+    for idx in range(0, len(items), 50):
+        chunk = dict(items[idx:idx + 50])
+        chunk_label = f" (chunk {idx//50 + 1})" if len(items) > 50 else ""
+        user_content = (
+            f"Section: {section_name}{chunk_label}\n"
+            f"Data: {json.dumps(chunk)}"
+        )
+        messages = [
+            {"role": "system", "content": (
+                "You are a senior IT transformation advisor. "
+                "Given the data summary, write a concise, professional narrative for the report section."
+            )},
+            {"role": "user", "content": user_content}
+        ]
+        try:
+            resp = openai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages,
+                temperature=0.3
+            )
+        except openai.RateLimitError:
+            # Fallback to a higher-throughput model
+            resp = openai.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=messages,
+                temperature=0.3
+            )
+        narratives.append(resp.choices[0].message.content.strip())
+    # Combine chunked narratives
+    return "\n\n".join(narratives)
 
 
 def generate_assessment(session_id: str, email: str, goal: str, files: list, next_action_webhook: str, folder_id: str) -> dict:
