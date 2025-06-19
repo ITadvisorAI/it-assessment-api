@@ -139,14 +139,14 @@ def ai_narrative(section_name: str, summary: dict) -> str:
         ]
         try:
             resp = openai.chat.completions.create(
-                model="gpt-4o-mini-high",
+                model="gpt-4o-mini",
                 messages=messages,
                 temperature=0.3
             )
-        except openai.RateLimitError:
-            # Fallback to gpt-4o-mini
+        except (openai.RateLimitError, openai.NotFoundError):
+                        # Fallback to gpt-3.5-turbo if primary fails
             resp = openai.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-3.5-turbo",
                 messages=messages,
                 temperature=0.3
             )
