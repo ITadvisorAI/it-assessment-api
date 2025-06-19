@@ -28,12 +28,30 @@ def build_score_summary(hw_df, sw_df):
 
 
 def build_section_2_overview(hw_df, sw_df):
+    """
+    Provides an overview of the IT landscape, handling missing columns safely.
+    """
     total_devices = len(hw_df)
-    total_apps = len(sw_df)
-    healthy_devices = hw_df[hw_df.get("Tier Total Score", 0) >= 75].shape[0]
-    compliant_licenses = sw_df[sw_df.get("License Status") != "Expired"].shape[0] if "License Status" in sw_df.columns else 0
-    return {"total_devices": total_devices, "total_applications": total_apps,
-            "healthy_devices": healthy_devices, "compliant_licenses": compliant_licenses}
+    total_applications = len(sw_df)
+
+    # Compute healthy devices if the score column exists
+    if "Tier Total Score" in hw_df.columns:
+        healthy_devices = int((hw_df["Tier Total Score"] >= 75).sum())
+    else:
+        healthy_devices = 0
+
+    # Compute compliant licenses if the license column exists
+    if "License Status" in sw_df.columns:
+        compliant_licenses = int((sw_df["License Status"] != "Expired").sum())
+    else:
+        compliant_licenses = 0
+
+    return {
+        "total_devices": total_devices,
+        "total_applications": total_applications,
+        "healthy_devices": healthy_devices,
+        "compliant_licenses": compliant_licenses
+    }
 
 
 def build_section_3_inventory_hardware(hw_df, sw_df):
