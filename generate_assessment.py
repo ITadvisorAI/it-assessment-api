@@ -42,7 +42,18 @@ def build_section_3_inventory_hardware(hw_df, sw_df):
     return {"hardware_items": hw_df.to_dict(orient="records")}
 
 def build_section_4_inventory_software(hw_df, sw_df):
-    return {"software_items": sw_df.to_dict(orient="records")}
+    """
+    Summarize software inventory by category and top applications,
+    instead of listing every item to reduce chunking.
+    """
+    total_apps = len(sw_df)
+    by_category = sw_df["Category"].value_counts().to_dict() if "Category" in sw_df.columns else {}
+    top5 = sw_df["App Name"].value_counts().head(5).to_dict() if "App Name" in sw_df.columns else {}
+    return {
+        "total_applications": total_apps,
+        "by_category": by_category,
+        "top_5_applications": top5
+    }"software_items": sw_df.to_dict(orient="records")}
 
 def build_section_5_classification_distribution(hw_df, sw_df):
     dist = hw_df["Category"].value_counts().to_dict() if "Category" in hw_df.columns else {}
