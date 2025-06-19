@@ -209,9 +209,33 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
         elif t in ('hardware_inventory','asset_hardware') or {'device id','device name'}<=cols: hw_df=pd.concat([hw_df,df_temp],ignore_index=True)
         else: sw_df=pd.concat([sw_df,df_temp],ignore_index=True)
     if not hw_df.empty:
-        hw_df=suggest_hw_replacements(pd.concat([HW_BASE_DF,hw_df],ignore_index=True))
-        hw_df=hw_df.merge(CLASSIFICATION_DF,how='left',left_on='Tier Total Score',right_on='Score')
+        hw_df = suggest_hw_replacements(pd.concat([HW_BASE_DF, hw_df], ignore_index=True))
+        # Inject default Tier Total Score if missing
+        if "Tier Total Score" not in hw_df.columns:
+            hw_df["Tier Total Score"] = 5
+        # Guard merge only if classification score exists
+        if "Tier Total Score" in hw_df.columns:
+            hw_df = hw_df.merge(
+                CLASSIFICATION_DF,
+                how='left',
+                left_on='Tier Total Score',
+                right_on='Score'
+            )
+            )
     if not sw_df.empty:
+        sw_df = suggest_sw_replacements(pd.concat([SW_BASE_DF, sw_df], ignore_index=True))
+        # Inject default Tier Total Score if missing
+        if "Tier Total Score" not in sw_df.columns:
+            sw_df["Tier Total Score"] = 5
+        # Guard merge only if classification score exists
+        if "Tier Total Score" in sw_df.columns:
+            sw_df = sw_df.merge(
+                CLASSIFICATION_DF,
+                how='left',
+                left_on='Tier Total Score',
+                right_on='Score'
+            )
+            )
         sw_df=suggest_sw_replacements(pd.concat([SW_BASE_DF,sw_df],ignore_index=True))
         sw_df=sw_df.merge(CLASSIFICATION_DF,how='left',left_on='Tier Total Score',right_on='Score')
     uploaded_charts=generate_visual_charts(hw_df,sw_df,session_path)
