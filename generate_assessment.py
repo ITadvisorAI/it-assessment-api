@@ -30,8 +30,8 @@ def build_score_summary(hw_df, sw_df):
 def build_section_2_overview(hw_df, sw_df):
     total_devices = len(hw_df)
     total_apps = len(sw_df)
-    healthy_devices = hw_df[hw_df["Tier Total Score"] >= 75].shape[0]
-    compliant_licenses = sw_df[sw_df["License Status"] != "Expired"].shape[0] if "License Status" in sw_df.columns else 0
+    healthy_devices = hw_df[hw_df.get("Tier Total Score", 0) >= 75].shape[0]
+    compliant_licenses = sw_df[sw_df.get("License Status") != "Expired"].shape[0] if "License Status" in sw_df.columns else 0
     return {
         "total_devices": total_devices,
         "total_applications": total_apps,
@@ -49,80 +49,81 @@ def build_section_4_inventory_software(hw_df, sw_df):
 
 
 def build_section_5_classification_distribution(hw_df, sw_df):
-    # reuse original distribution logic
-    if "Category" in hw_df.columns:
-        dist = hw_df["Category"].value_counts().to_dict()
-    else:
-        dist = {}
+    dist = hw_df.get("Category", pd.Series()).value_counts().to_dict() if "Category" in hw_df.columns else {}
     return {"classification_distribution": dist}
 
 
 def build_section_6_lifecycle_status(hw_df, sw_df):
     # stub: summarize lifecycle if available
-    return {}
+    return {"lifecycle_status": []}
 
 
 def build_section_7_software_compliance(hw_df, sw_df):
-    # stub: compliance details
-    compliant = sw_df[sw_df["License Status"] != "Expired"].shape[0] if "License Status" in sw_df.columns else 0
-    expired = sw_df[sw_df["License Status"] == "Expired"].shape[0] if "License Status" in sw_df.columns else 0
+    compliant = sw_df[sw_df.get("License Status") != "Expired"].shape[0] if "License Status" in sw_df.columns else 0
+    expired = sw_df[sw_df.get("License Status") == "Expired"].shape[0] if "License Status" in sw_df.columns else 0
     return {"compliant_count": compliant, "expired_count": expired}
 
 
 def build_section_8_security_posture(hw_df, sw_df):
     # stub
-    return {}
+    return {"vulnerabilities": []}
 
 
 def build_section_9_performance(hw_df, sw_df):
     # stub
-    return {}
+    return {"performance_metrics": []}
 
 
 def build_section_10_reliability(hw_df, sw_df):
     # stub
-    return {}
+    return {"reliability_metrics": []}
 
 
 def build_section_11_scalability(hw_df, sw_df):
     # stub
-    return {}
+    return {"scalability_opportunities": []}
 
 
 def build_section_12_legacy_technical_debt(hw_df, sw_df):
     # stub
-    return {}
+    return {"legacy_issues": []}
 
 
 def build_section_13_obsolete_risk(hw_df, sw_df):
-    # reuse risk builder
-    from generate_assessment import build_section_3_risk
-    return build_section_3_risk(hw_df, sw_df)
+    # Inline risk logic instead of importing non-existent function
+    risks = []
+    if not hw_df.empty:
+        high_risk_hw = hw_df[hw_df.get("Tier Total Score", 0) < 30]
+        risks.append({"hardware": high_risk_hw.to_dict(orient="records")})
+    if not sw_df.empty:
+        high_risk_sw = sw_df[sw_df.get("Tier Total Score", 0) < 30]
+        risks.append({"software": high_risk_sw.to_dict(orient="records")})
+    return {"risks": risks}
 
 
 def build_section_14_cloud_migration(hw_df, sw_df):
     # stub
-    return {}
+    return {"cloud_migration": []}
 
 
 def build_section_15_strategic_alignment(hw_df, sw_df):
     # stub
-    return {}
+    return {"alignment": []}
 
 
 def build_section_16_business_impact(hw_df, sw_df):
     # stub
-    return {}
+    return {"business_impact": []}
 
 
 def build_section_17_financial_implications(hw_df, sw_df):
     # stub
-    return {}
+    return {"financial_implications": []}
 
 
 def build_section_18_environmental_sustainability(hw_df, sw_df):
     # stub
-    return {}
+    return {"environmental_sustainability": []}
 
 
 def build_recommendations(hw_df, sw_df):
@@ -132,31 +133,26 @@ def build_recommendations(hw_df, sw_df):
 
 
 def build_section_20_next_steps(hw_df, sw_df):
-    # reuse action items builder
-    from generate_assessment import build_section_8_action_items
     return build_section_8_action_items(hw_df, sw_df)
 
 
 def build_key_findings(hw_df, sw_df):
-    # existing key findings logic
     findings = []
     if "Tier Total Score" in hw_df.columns:
-        low = hw_df[hw_df["Tier Total Score"] < 50]
+        low = hw_df[hw_df.get("Tier Total Score", 0) < 50]
         findings.append({"hardware_low_score": low.to_dict(orient="records")})
     if "Tier Total Score" in sw_df.columns:
-        low_sw = sw_df[sw_df["Tier Total Score"] < 50]
+        low_sw = sw_df[sw_df.get("Tier Total Score", 0) < 50]
         findings.append({"software_low_score": low_sw.to_dict(orient="records")})
     return {"findings": findings}
 
 
 def build_section_6_distribution(hw_df, sw_df):
-    # original distribution
-    dist_hw = hw_df["Category"].value_counts().to_dict() if "Category" in hw_df.columns else {}
+    dist_hw = hw_df.get("Category", pd.Series()).value_counts().to_dict() if "Category" in hw_df.columns else {}
     return {"hardware_distribution": dist_hw}
 
 
 def build_section_7_trend_analysis(hw_df, sw_df):
-    # original trends
     return {"trends": []}
 
 
@@ -220,7 +216,6 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
         elif provided in ('software_inventory','asset_software') or {'app id','app name','license status'}.issubset(cols):
             sw_df = pd.concat([sw_df, df_temp], ignore_index=True) if not sw_df.empty else df_temp
         else:
-            # default to hardware
             hw_df = pd.concat([hw_df, df_temp], ignore_index=True) if not hw_df.empty else df_temp
 
     # Enrich & classify
