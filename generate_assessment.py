@@ -140,38 +140,69 @@ def build_section_20_next_steps(hw_df, sw_df):
 
 def ai_narrative(section_name: str, summary: dict) -> str:
     """
-    Generate a narrative in chunks to avoid rate-limit errors.
+    Generate a narrative in manageable chunks to avoid rate-limit errors by splitting the largest list in the summary.
     """
-    items = list(summary.items())
-    narratives = []
-    for idx in range(0, len(items), 50):
-        chunk = dict(items[idx:idx + 50])
-        label = f" (chunk {idx//50+1})" if len(items) > 50 else ""
-        user_content = f"Section: {section_name}{label}\nData: {json.dumps(chunk)}"
-        messages = [
-            {"role": "system", "content": (
-                "You are a senior IT transformation advisor. "
-                "Given the data summary, write a concise, professional narrative for the report section."
-            )},
-            {"role": "user", "content": user_content}
-        ]
-        try:
-            resp = openai.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=messages,
-                temperature=0.3
-            )
-        except (openai.RateLimitError, openai.NotFoundError):
-                        # Fallback to gpt-3.5-turbo if primary fails
-            resp = openai.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=messages,
-                temperature=0.3
-            )
-        narratives.append(resp.choices[0].message.content.strip())
-    return "\n\n".join(narratives)
+    # Identify list entries for potential chunking
+    list_items = [(k, v) for k, v in summary.items() if isinstance(v, list)]
+    if list_items:
+        # Choose the largest list to chunk
+        largest_key, largest_list = max(list_items, key=lambda x: len(x[1]))
+        total = len(largest_list)
+        chunk_size = 20
+        narratives = []
+        for i in range(0, total, chunk_size):
+            sublist = largest_list[i:i+chunk_size]
+            chunked_summary = summary.copy()
+            chunked_summary[largest_key] = sublist
+            label = f" (chunk {i//chunk_size+1})" if total > chunk_size else ""
+            user_content = f"Section: {section_name}{label}
+Data: {json.dumps(chunked_summary)}"
+            messages = [
+                {"role": "system", "content": (
+                    "You are a senior IT transformation advisor. "
+                    "Given the data summary, write a concise, professional narrative for the report section."
+                )},
+                {"role": "user", "content": user_content}
+            ]
+            try:
+                resp = openai.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=messages,
+                    temperature=0.3
+                )
+            except (openai.RateLimitError, openai.NotFoundError):
+                resp = openai.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=messages,
+                    temperature=0.3
+                )
+            narratives.append(resp.choices[0].message.content.strip())
+        return "
 
-
+".join(narratives)
+    # No lists to chunk: send full summary
+    user_content = f"Section: {section_name}
+Data: {json.dumps(summary)}"
+    messages = [
+        {"role": "system", "content": (
+            "You are a senior IT transformation advisor. "
+            "Given the data summary, write a concise, professional narrative for the report section."
+        )},
+        {"role": "user", "content": user_content}
+    ]
+    try:
+        resp = openai.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            temperature=0.3
+        )
+    except (openai.RateLimitError, openai.NotFoundError):
+        resp = openai.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=messages,
+            temperature=0.3
+        )
+    return resp.choices[0].message.content.strip()
 def generate_assessment(session_id: str, email: str, goal: str, files: list, next_action_webhook: str, folder_id: str) -> dict:
     # Prepare dataframes
     hw_df, sw_df = pd.DataFrame(), pd.DataFrame()
