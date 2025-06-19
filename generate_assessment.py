@@ -168,14 +168,22 @@ def generate_assessment(
     sw_df = pd.DataFrame()
     hw_file_path = None
     sw_file_path = None
-    for f in files:
+        for f in files:
         url, name = f['file_url'], f['file_name']
         local = os.path.join(session_path, name)
         print(f"[DEBUG] Download {name}", flush=True)
-        response = requests.get(url) if url.startswith("http") else open(url, 'rb')
-        content = getattr(response, 'content', response.read())
+        # Fetch file content correctly depending on URL or local path
+        if url.startswith("http"):
+            r = requests.get(url)
+            r.raise_for_status()
+            content = r.content
+        else:
+            with open(url, 'rb') as src:
+                content = src.read()
+        # Save to local path
         with open(local, 'wb') as fh:
             fh.write(content)
+        # Determine file types for processing
         if f.get('type') == 'asset_inventory':
             if not hw_file_path:
                 hw_file_path = local
