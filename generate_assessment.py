@@ -166,9 +166,9 @@ def generate_assessment(
     # Download files
     hw_df = pd.DataFrame()
     sw_df = pd.DataFrame()
-    hw_file_path = None
+        hw_file_path = None
     sw_file_path = None
-        for f in files:
+    for f in files:
         url, name = f['file_url'], f['file_name']
         local = os.path.join(session_path, name)
         print(f"[DEBUG] Download {name}", flush=True)
