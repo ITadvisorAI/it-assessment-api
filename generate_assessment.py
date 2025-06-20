@@ -273,11 +273,11 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
         payload = {"session_id": session_id, "email": email, "goal": goal, **uploaded_charts, **narratives}
         print(f"[DEBUG] Payload assembled with keys: {list(payload.keys())}", flush=True)
         # Send to DOCX/PPTX generator (single endpoint)
-            resp.raise_for_status()
-            resp = requests.post(f"{DOCX_SERVICE_URL}/generate_assessment", json=payload)
-            resp_data = resp.json()
-            docx_url = resp_data.get('docx_url')
-            pptx_url = resp_data.get('pptx_url')
+        resp = requests.post(f"{DOCX_SERVICE_URL}/generate_assessment", json=payload)
+        resp.raise_for_status()
+        resp_data = resp.json()
+        docx_url = resp_data.get('docx_url')
+        pptx_url = resp_data.get('pptx_url')
         # Upload to Drive
         file_links = {}
         if docx_url:
