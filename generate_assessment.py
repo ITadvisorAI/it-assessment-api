@@ -272,18 +272,12 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
         # Assemble payload
         payload = {"session_id": session_id, "email": email, "goal": goal, **uploaded_charts, **narratives}
         print(f"[DEBUG] Payload assembled with keys: {list(payload.keys())}", flush=True)
-        # Send to DOCX
-        print(f"[DEBUG] Sending payload to DOCX generator", flush=True)
-        resp_docx = requests.post(f"{DOCX_SERVICE_URL}/generate_docx", json=payload)
-        resp_docx.raise_for_status()
-        docx_url = resp_docx.json().get('file_url')
-        print(f"[DEBUG] DOCX generated at {docx_url}", flush=True)
-        # Send to PPTX
-        print(f"[DEBUG] Sending payload to PPTX generator", flush=True)
-        resp_pptx = requests.post(f"{DOCX_SERVICE_URL}/generate_pptx", json=payload)
-        resp_pptx.raise_for_status()
-        pptx_url = resp_pptx.json().get('file_url')
-        print(f"[DEBUG] PPTX generated at {pptx_url}", flush=True)
+        # Send to DOCX/PPTX generator (single endpoint)
+            resp = requests.post(f"{DOCX_SERVICE_URL}/generate_assessment", json=payload)
+            resp.raise_for_status()
+            resp_data = resp.json()
+            docx_url = resp_data.get('docx_url')
+            pptx_url = resp_data.get('pptx_url')
         # Upload to Drive
         file_links = {}
         if docx_url:
