@@ -46,15 +46,12 @@ def build_section_4_inventory_software(hw_df, sw_df):
     Summarize software inventory by category and top applications,
     instead of listing every item to reduce chunking.
     """
-    total_apps = len(sw_df)
-    by_category = sw_df["Category"].value_counts().to_dict() if "Category" in sw_df.columns else {}
+    counts = sw_df["Category"].value_counts().to_dict() if "Category" in sw_df.columns else {}
     top5 = sw_df["App Name"].value_counts().head(5).to_dict() if "App Name" in sw_df.columns else {}
-    software_items = sw_df.to_dict(orient="records")
     return {
-        "total_applications": total_apps,
-        "by_category": by_category,
-        "top_5_applications": top5,
-        "software_items": software_items
+        "total_apps": len(sw_df),
+        "by_category": counts,
+        "top_5_apps": top5
     }
 
 def build_section_5_classification_distribution(hw_df, sw_df):
