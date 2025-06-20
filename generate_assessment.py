@@ -53,7 +53,8 @@ def build_section_4_inventory_software(hw_df, sw_df):
         "total_applications": total_apps,
         "by_category": by_category,
         "top_5_applications": top5
-    }"software_items": sw_df.to_dict(orient="records")}
+        "software_items": sw_df.to_dict(orient="records")
+    }
 
 def build_section_5_classification_distribution(hw_df, sw_df):
     dist = hw_df["Category"].value_counts().to_dict() if "Category" in hw_df.columns else {}
