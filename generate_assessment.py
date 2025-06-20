@@ -297,7 +297,23 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
         # Notify market-gap
         final_payload = {'session_id': session_id, 'gpt_module': 'it_assessment', 'status': 'complete', **file_links}
         print(f"[DEBUG] Notifying market-gap with payload: {final_payload}", flush=True)
-        requests.post(next_action_webhook or MARKET_GAP_WEBHOOK, json=final_payload).raise_for_status()
+       # send the payload
+        resp = requests.post(
+        next_action_webhook or MARKET_GAP_WEBHOOK,
+        json=final_payload,
+        timeout=60  # optional, but good practice
+    )
+
+      # if it failed, log status and full body so you see the API’s error message
+      if resp.status_code >= 400:
+      # if you have a logger set up:
+    logger.error(
+        f"Market‐Gap API error {resp.status_code}: {resp.text}"
+    )
+    # or just print if no logger:
+        print(f"[Market‐Gap API error {resp.status_code}]\n{resp.text}")
+    # now fail loudly as before
+        resp.raise_for_status()
         print(f"[DEBUG] Market-gap notified successfully", flush=True)
         return final_payload
     except Exception as e:
