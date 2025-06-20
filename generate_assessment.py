@@ -49,11 +49,12 @@ def build_section_4_inventory_software(hw_df, sw_df):
     total_apps = len(sw_df)
     by_category = sw_df["Category"].value_counts().to_dict() if "Category" in sw_df.columns else {}
     top5 = sw_df["App Name"].value_counts().head(5).to_dict() if "App Name" in sw_df.columns else {}
+    software_items = sw_df.to_dict(orient="records")
     return {
         "total_applications": total_apps,
         "by_category": by_category,
         "top_5_applications": top5,
-        "software_items": sw_df.to_dict(orient="records")
+        "software_items": software_items
     }
 
 def build_section_5_classification_distribution(hw_df, sw_df):
