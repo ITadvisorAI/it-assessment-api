@@ -52,7 +52,7 @@ def build_section_4_inventory_software(hw_df, sw_df):
     return {
         "total_applications": total_apps,
         "by_category": by_category,
-        "top_5_applications": top5
+        "top_5_applications": top5,
         "software_items": sw_df.to_dict(orient="records")
     }
 
