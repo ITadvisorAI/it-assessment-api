@@ -295,7 +295,7 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
             file_links['file_10_drive_url'] = upload_to_drive(local_ppt, fname, folder_id)
             print(f"[DEBUG] PPTX uploaded, Drive URL: {file_links['file_10_drive_url']}", flush=True)
         # Notify market-gap
-        final_payload = {'session_id': session_id, 'folder_id': payload.get('folder_id'), 'gpt_module': 'it_assessment', 'status': 'complete', **file_links}
+        final_payload = {'session_id': session_id, 'folder_id': folder_id, 'gpt_module': 'it_assessment', 'status': 'complete', **file_links}
         print(f"[DEBUG] Notifying market-gap with payload: {final_payload}", flush=True)
 
         # send the payload
