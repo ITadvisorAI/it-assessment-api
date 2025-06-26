@@ -315,9 +315,38 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
             print(f"[DEBUG] Market-gap notified successfully", flush=True)
         return final_payload
         try:
-        except Exception as e:
-        import traceback; traceback.print_exc()
-        return {'error': str(e)}
+            resp = requests.post(
+                next_action_webhook or MARKET_GAP_WEBHOOK,
+                json=final_payload,
+                timeout=60
+            )
+                # if it failed, log status and body so you see the API’s error message
+        if resp.status_code >= 400:
+            logger.error(f"Market-Gap API error {resp.status_code}: {resp.text}")
+            # or just print if no logger:
+            print(f"[Market-Gap API error {resp.status_code}]\n{resp.text}")
+            resp.raise_for_status()
+
+            print(f"[DEBUG] Market-gap notified successfully", flush=True)
+        return final_payload
+        try:
+        resp = requests.post(
+            next_action_webhook or MARKET_GAP_WEBHOOK,
+            json=final_payload,
+            timeout=60
+        )
+        resp.raise_for_status()
+
+        print("[DEBUG] Market-gap notified successfully", flush=True)
+        return final_payload
+
+    except Exception as e:
+        # log the full traceback for debugging
+        import traceback
+        traceback.print_exc()
+
+        # return an error payload so downstream knows something failed
+        return {"error": str(e)}
 
 
 def process_assessment(data: dict) -> dict:
