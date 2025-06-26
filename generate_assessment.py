@@ -294,8 +294,38 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
             r = requests.get(pptx_url); r.raise_for_status(); open(local_ppt, 'wb').write(r.content)
             file_links['file_10_drive_url'] = upload_to_drive(local_ppt, fname, folder_id)
             print(f"[DEBUG] PPTX uploaded, Drive URL: {file_links['file_10_drive_url']}", flush=True)
-        # Notify market-gap
-        final_payload = {'session_id': session_id, 'folder_id': folder_id, 'gpt_module': 'it_assessment', 'status': 'complete', **file_links}
+
+        # 1a) Serialize the two gap-analysis workbooks
+            hw_xl = os.path.join(session_path, f"hw_gap_analysis_{session_id}.xlsx")
+            sw_xl = os.path.join(session_path, f"sw_gap_analysis_{session_id}.xlsx")
+            hw_df.to_excel(hw_xl, index=False)
+            sw_df.to_excel(sw_xl, index=False)
+       
+        # 1b) Upload them to Drive
+          hw_url = upload_to_drive(hw_xl, os.path.basename(hw_xl), folder_id)
+          sw_url = upload_to_drive(sw_xl, os.path.basename(sw_xl), folder_id)
+        # ─── Step 4: assemble the HW/SW gap‐analysis Excels for Market‐Gap ───
+          files_for_gap = [
+        { "file_name": os.path.basename(hw_xl), "drive_url": hw_url },
+        { "file_name": os.path.basename(sw_xl), "drive_url": sw_url }
+        ]
+
+     # Notify market-gap
+     final_payload = {
+        "session_id": session_id,
+        "folder_id":  folder_id,
+        "gpt_module": "it_assessment",
+        "status":     "complete",
+
+    # 4a) the two gap‐analysis workbooks
+        "files":     files_for_gap,
+
+    # 4b) your charts so Market‐Gap can embed them
+        "charts":    uploaded_charts,
+
+    # 4c) (optional) keep your docx/pptx links if you still need them
+        **file_links
+    }
         print(f"[DEBUG] Notifying market-gap with payload: {final_payload}", flush=True)
 
         # send the payload
