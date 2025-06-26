@@ -314,6 +314,7 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
 
             print(f"[DEBUG] Market-gap notified successfully", flush=True)
         return final_payload
+        try:
         except Exception as e:
         import traceback; traceback.print_exc()
         return {'error': str(e)}
