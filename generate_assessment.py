@@ -308,7 +308,7 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
         # if it failed, log status and body so you see the API’s error message
         if resp.status_code >= 400:
             logger.error(f"Market-Gap API error {resp.status_code}: {resp.text}")
-            # or just print if no logger:
+        # or just print if no logger:
             print(f"[Market-Gap API error {resp.status_code}]\n{resp.text}")
             resp.raise_for_status()
 
@@ -320,7 +320,7 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
                 json=final_payload,
                 timeout=60
             )
-                # if it failed, log status and body so you see the API’s error message
+        # if it failed, log status and body so you see the API’s error message
         if resp.status_code >= 400:
             logger.error(f"Market-Gap API error {resp.status_code}: {resp.text}")
             # or just print if no logger:
@@ -340,7 +340,7 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
         print("[DEBUG] Market-gap notified successfully", flush=True)
         return final_payload
 
-    except Exception as e:
+        except Exception as e:
         # log the full traceback for debugging
         import traceback
         traceback.print_exc()
