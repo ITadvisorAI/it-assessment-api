@@ -244,23 +244,65 @@ def generate_assessment(session_id: str,
 
         # ─ 8) Build payload for your DOCX/PPTX generator ────
         doc_generator_payload = {
+            print(f"[DEBUG] Calling Report-Generator at {DOCX_SERVICE_URL}/generate_assessment", flush=True)
+        payload = {
             "session_id": session_id,
-            "date":       pd.Timestamp.now().strftime("%Y-%m-%d"),
-            "organization_name": "",
-            "content": {
-                "executive_summary":           narrative_1,
-                "current_state_overview":      narrative_2,
-                "hardware_gap_analysis":       narrative_4,  # or narrative_?
-                "software_gap_analysis":       narrative_5,  # adjust indices
-                "market_benchmarking":         narrative_19,
-                "appendices": [f["file_name"] for f in files_for_gap]
-            },
-            "charts": {
-                "hardware_insights_tier": charts.get("hw_status_chart"),
-                "software_insights_tier": charts.get("sw_status_chart")
-            },
-            "files": files_for_gap
+            "email":      email,
+            "goal":       goal,
+
+            # your two gap-analysis Excel URLs:
+            "hw_gap_url": links.get("file_1_drive_url"),
+            "sw_gap_url": links.get("file_2_drive_url"),
+
+            # local chart paths for the generator to embed:
+            "chart_paths": charts,
+
+            # the 20 narrative sections, exactly as your template expects:
+            "content_1":  score_summary,
+            "content_2":  section_2_overview,
+            "content_3":  section_3_inventory_hardware,
+            "content_4":  section_4_inventory_software,
+            "content_5":  section_5_classification_distribution,
+            "content_6":  section_6_lifecycle_status,
+            "content_7":  section_7_software_compliance,
+            "content_8":  section_8_security_posture,
+            "content_9":  section_9_performance,
+            "content_10": section_10_reliability,
+            "content_11": section_11_scalability,
+            "content_12": section_12_legacy_technical_debt,
+            "content_13": section_13_obsolete_risk,
+            "content_14": section_14_cloud_migration,
+            "content_15": section_15_strategic_alignment,
+            "content_16": section_16_business_impact,
+            "content_17": section_17_financial_implications,
+            "content_18": section_18_environmental_sustainability,
+            "content_19": recommendations,
+            "content_20": section_20_next_steps,
+
+            # any appendices your template uses:
+            "appendix_classification_matrix": classification_matrix_md,
+            "appendix_data_sources":          data_sources_text,
+
+            # explicit slide‐by‐slide duplication (if your PPTX template
+            # uses slide placeholders instead of content_#):
+            "slide_executive_summary":       score_summary,
+            "slide_it_landscape_overview":   section_2_overview,
+            "slide_hardware_analysis":       section_3_inventory_hardware,
+            "slide_software_analysis":       section_4_inventory_software,
+            "slide_tier_classification_summary": section_5_classification_distribution,
+            "slide_hardware_lifecycle_chart":    section_6_lifecycle_status,
+            # …and so on for each slide placeholder…
         }
+        resp = requests.post(f"{DOCX_SERVICE_URL}/generate_assessment", json=payload)
+        resp.raise_for_status()
+        gen = resp.json()
+        print(f"[DEBUG] Report-Generator response: {gen}", flush=True)
+
+        # extract the relative URLs and turn into full links
+        docx_rel = gen.get("docx_url")
+        pptx_rel = gen.get("pptx_url")
+        docx_url = f"{DOCX_SERVICE_URL.rstrip('/')}{docx_rel}"
+        pptx_url = f"{DOCX_SERVICE_URL.rstrip('/')}{pptx_rel}"
 
         # 9) Call the DOCX/PPTX generator service
         resp = requests.post(
