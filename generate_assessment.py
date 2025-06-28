@@ -4,6 +4,8 @@ import traceback
 import pandas as pd
 import requests
 from openai import OpenAI
+from openpyxl import load_workbook
+import matplotlib.pyplot as plt
 from market_lookup import suggest_hw_replacements, suggest_sw_replacements
 from visualization import generate_visual_charts
 from drive_utils import upload_to_drive
@@ -239,14 +241,26 @@ def generate_assessment(session_id: str,
 
         # 3) Generate & upload charts
         print("[DEBUG] Generating charts...", flush=True)
+        # 3) Generate & upload hardware charts
         charts = generate_visual_charts(hw_df, sw_df, workspace)
         for key, path in list(charts.items()):
-            try:
-                url = upload_to_drive(path, os.path.basename(path), folder_id)
-                charts[key] = url
-                print(f"[DEBUG] Uploaded chart '{key}' → {url}", flush=True)
-            except Exception as ex:
-                print(f"[ERROR] Chart upload failed for {key}: {ex}", flush=True)
+            url = upload_to_drive(path, os.path.basename(path), folder_id)
+            charts[key] = url
+
+        # 3b) Generate & upload software charts
+        sw_tier_path   = os.path.join(workspace, "sw_tier_chart.png")
+        sw_status_path = os.path.join(workspace, "sw_status_chart.png")
+        # Tier distribution
+        sw_df["Tier Total Score"].hist(bins=10)
+        plt.title("SW Tier Distribution")
+        plt.savefig(sw_tier_path); plt.clf()
+        # License status pie
+        sw_df["License Status"].value_counts().plot.pie(autopct="%1.1f%%")
+        plt.title("SW License Status")
+        plt.savefig(sw_status_path); plt.clf()
+        for path, key in [(sw_tier_path, "sw_tier_chart"), (sw_status_path, "sw_status_chart")]:
+            url = upload_to_drive(path, os.path.basename(path), folder_id)
+            charts[key] = url
 
         # 4) Build AI narratives
         section_fns = [
@@ -269,7 +283,9 @@ def generate_assessment(session_id: str,
         hw_path = os.path.join(workspace, "HWGapAnalysis.xlsx")
         sw_path = os.path.join(workspace, "SWGapAnalysis.xlsx")
         hw_df.to_excel(hw_path, index=False)
-        sw_df.to_excel(sw_path, index=False)
+        # 5) Write out the templated Excel files (preserving charts & formulas)
+        write_df_to_template(hw_df, HW_TEMPLATE_PATH, hw_path)
+        write_df_to_template(sw_df, SW_TEMPLATE_PATH, sw_path)
         hw_url = upload_to_drive(hw_path, os.path.basename(hw_path), folder_id)
         sw_url = upload_to_drive(sw_path, os.path.basename(sw_path), folder_id)
         print(f"[DEBUG] Excels uploaded: HW→{hw_url}, SW→{sw_url}", flush=True)
