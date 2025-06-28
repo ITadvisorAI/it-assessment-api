@@ -3,7 +3,7 @@ import json
 import traceback
 import pandas as pd
 import requests
-import openai
+from openai import OpenAI
 from market_lookup import suggest_hw_replacements, suggest_sw_replacements
 from visualization import generate_visual_charts
 from drive_utils import upload_to_drive
@@ -11,41 +11,32 @@ from drive_utils import upload_to_drive
 # ────────────────────────────────────────────────────────────────────────────────
 # Configuration & Constants
 # ────────────────────────────────────────────────────────────────────────────────
-# Directory where your Excel templates live
-TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
-HW_TEMPLATE_PATH = os.path.join(TEMPLATES_DIR, "HWGapAnalysis.xlsx")
-SW_TEMPLATE_PATH = os.path.join(TEMPLATES_DIR, "SWGapAnalysis.xlsx")
-CLASSIFICATION_PATH = os.path.join(TEMPLATES_DIR, "ClassificationTier.xlsx")
+TEMPLATES_DIR      = os.path.join(os.path.dirname(__file__), "templates")
+HW_TEMPLATE_PATH   = os.path.join(TEMPLATES_DIR, "HWGapAnalysis.xlsx")
+SW_TEMPLATE_PATH   = os.path.join(TEMPLATES_DIR, "SWGapAnalysis.xlsx")
+CLASSIFICATION_PATH= os.path.join(TEMPLATES_DIR, "ClassificationTier.xlsx")
 
-# Service endpoints (override via env vars if needed)
 DOCX_SERVICE_URL   = os.getenv("DOCX_SERVICE_URL",   "https://docx-generator-api.onrender.com")
 MARKET_GAP_WEBHOOK = os.getenv("MARKET_GAP_WEBHOOK", "https://market-gap-analysis.onrender.com/start_market_gap")
 
-# OpenAI settings
-OPENAI_MODEL      = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_MODEL       = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", "0.7"))
-# ────────────────────────────────────────────────────────────────────────────────
+
+# Instantiate new OpenAI client
+client = OpenAI()
 
 print("[DEBUG] Loading Excel templates...", flush=True)
-# Load base templates and classification
-HW_TEMPLATE_DF   = pd.read_excel(HW_TEMPLATE_PATH)
-SW_TEMPLATE_DF   = pd.read_excel(SW_TEMPLATE_PATH)
+HW_TEMPLATE_DF    = pd.read_excel(HW_TEMPLATE_PATH)
+SW_TEMPLATE_DF    = pd.read_excel(SW_TEMPLATE_PATH)
 CLASSIFICATION_DF = pd.read_excel(CLASSIFICATION_PATH)
 print("[DEBUG] Templates loaded:", 
-      f"HW={HW_TEMPLATE_DF.shape}", 
-      f"SW={SW_TEMPLATE_DF.shape}", 
-      f"CL={CLASSIFICATION_DF.shape}", flush=True)
+      f"HW={HW_TEMPLATE_DF.shape}", f"SW={SW_TEMPLATE_DF.shape}", f"CL={CLASSIFICATION_DF.shape}", flush=True)
 
 
 # ────────────────────────────────────────────────────────────────────────────────
 # Utility Functions
 # ────────────────────────────────────────────────────────────────────────────────
 def merge_with_template(template_df: pd.DataFrame, inv_df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Ensure every column in the incoming inventory exists in the template,
-    then append the inventory rows onto the template (preserving any
-    pre-built formulas or blank rows for charts).
-    """
     for col in inv_df.columns:
         if col not in template_df.columns:
             template_df[col] = pd.NA
@@ -55,9 +46,6 @@ def merge_with_template(template_df: pd.DataFrame, inv_df: pd.DataFrame) -> pd.D
     return merged
 
 def apply_classification(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Join the Tier Total Score to its Category via the loaded classification tiers.
-    """
     if "Tier Total Score" in df.columns:
         merged = df.merge(CLASSIFICATION_DF, how="left",
                           left_on="Tier Total Score", right_on="Score")
@@ -66,34 +54,30 @@ def apply_classification(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 def detect_inventory_type(df: pd.DataFrame, filename: str) -> str:
-    """
-    Loosely detect whether a DataFrame is hardware or software inventory.
-    Returns "hw", "sw", or "".
-    """
     cols = [c.lower() for c in df.columns]
     name = filename.lower()
-    if any("device" in c for c in cols) or "server" in name or "hw" in name:
+    if any("device" in c for c in cols) or "server" in name:
         return "hw"
-    if any("app" in c for c in cols) or "software" in name or "sw" in name:
+    if any("app" in c for c in cols) or "software" in name:
         return "sw"
     return ""
 
 def ai_narrative(section_name: str, data_summary: dict) -> str:
     """
-    Use OpenAI to draft a narrative for a given section based on summary data.
+    Generate a narrative via the new OpenAI v1 API.
     """
     prompt = (
         f"You are an IT infrastructure analyst. "
-        f"Please write a concise, insightful narrative for the section '{section_name}' "
-        f"using this data:\n{json.dumps(data_summary, indent=2)}"
+        f"Write a concise narrative for the section '{section_name}' "
+        f"based on this data:\n{json.dumps(data_summary, indent=2)}"
     )
     print(f"[DEBUG] ai_narrative → prompting for {section_name}", flush=True)
-    resp = openai.ChatCompletion.create(
+    resp = client.chat.completions.create(
         model=OPENAI_MODEL,
         temperature=OPENAI_TEMPERATURE,
         messages=[
             {"role": "system", "content": "You draft professional IT infrastructure analysis narratives."},
-            {"role": "user", "content": prompt}
+            {"role": "user",   "content": prompt}
         ]
     )
     text = resp.choices[0].message.content.strip()
@@ -122,7 +106,7 @@ def build_section_3_inventory_hardware(hw_df, sw_df):
 
 def build_section_4_inventory_software(hw_df, sw_df):
     by_cat = sw_df.get("Category", pd.Series()).value_counts().to_dict()
-    top5 = sw_df.get("App Name", pd.Series()).value_counts().head(5).to_dict()
+    top5  = sw_df.get("App Name", pd.Series()).value_counts().head(5).to_dict()
     return {"by_category": by_cat, "top_5_apps": top5}
 
 def build_section_5_classification_distribution(hw_df, sw_df):
@@ -134,7 +118,7 @@ def build_section_6_lifecycle_status(hw_df, sw_df):
 
 def build_section_7_software_compliance(hw_df, sw_df):
     expired = int((sw_df.get("License Status", "") == "Expired").sum())
-    valid = int(len(sw_df) - expired)
+    valid   = int(len(sw_df) - expired)
     return {"valid_licenses": valid, "expired_licenses": expired}
 
 def build_section_8_security_posture(hw_df, sw_df):
@@ -197,36 +181,34 @@ def generate_assessment(session_id: str,
                         folder_id: str) -> dict:
     print(f"[DEBUG] → Starting assessment for session '{session_id}'", flush=True)
     try:
-        # Prepare workspace
+        # Workspace
         workspace = os.path.join(os.getcwd(), session_id)
         os.makedirs(workspace, exist_ok=True)
         print(f"[DEBUG] Workspace created at {workspace}", flush=True)
 
-        # 1) Download & ingest files
+        # 1) Download & ingest
         hw_df = pd.DataFrame()
         sw_df = pd.DataFrame()
         for f in files:
             name = f.get("file_name","unknown.xlsx")
             url  = f.get("file_url","")
             local = os.path.join(workspace, name)
-            resp = requests.get(url)
-            resp.raise_for_status()
-            with open(local, "wb") as fp:
-                fp.write(resp.content)
+            r = requests.get(url); r.raise_for_status()
+            with open(local, "wb") as fp: fp.write(r.content)
             temp_df = pd.read_excel(local)
             temp_df.columns = [c.strip() for c in temp_df.columns]
             inv_type = detect_inventory_type(temp_df, name)
-            print(f"[DEBUG] File '{name}' detected as '{inv_type}' inventory", flush=True)
+            print(f"[DEBUG] File '{name}' detected as '{inv_type}'", flush=True)
             if inv_type == "hw":
                 hw_df = pd.concat([hw_df, temp_df], ignore_index=True)
             elif inv_type == "sw":
                 sw_df = pd.concat([sw_df, temp_df], ignore_index=True)
             else:
-                print(f"[WARN] Unknown inventory type for '{name}', skipping", flush=True)
+                print(f"[WARN] Skipping unknown inventory '{name}'", flush=True)
 
         print(f"[DEBUG] After ingestion: hw_df={hw_df.shape}, sw_df={sw_df.shape}", flush=True)
 
-        # 2) Merge with templates & classify
+        # 2) Merge & classify
         hw_df = merge_with_template(HW_TEMPLATE_DF.copy(), hw_df)
         sw_df = merge_with_template(SW_TEMPLATE_DF.copy(), sw_df)
         hw_df = suggest_hw_replacements(hw_df)
@@ -234,7 +216,7 @@ def generate_assessment(session_id: str,
         hw_df = apply_classification(hw_df)
         sw_df = apply_classification(sw_df)
 
-        # 3) Generate & upload charts
+        # 3) Charts
         print("[DEBUG] Generating charts...", flush=True)
         charts = generate_visual_charts(hw_df, sw_df, workspace)
         for key, path in list(charts.items()):
@@ -245,7 +227,7 @@ def generate_assessment(session_id: str,
             except Exception as ex:
                 print(f"[ERROR] Chart upload failed for {key}: {ex}", flush=True)
 
-        # 4) Build narratives
+        # 4) Narratives
         section_fns = [
             build_score_summary, build_section_2_overview, build_section_3_inventory_hardware,
             build_section_4_inventory_software, build_section_5_classification_distribution,
@@ -264,7 +246,7 @@ def generate_assessment(session_id: str,
             summary = fn(hw_df, sw_df)
             narratives[f"content_{idx}"] = ai_narrative(name, summary)
 
-        # 5) Write out Excel files
+        # 5) Write Excel
         hw_path = os.path.join(workspace, "HWGapAnalysis.xlsx")
         sw_path = os.path.join(workspace, "SWGapAnalysis.xlsx")
         hw_df.to_excel(hw_path, index=False)
@@ -273,7 +255,7 @@ def generate_assessment(session_id: str,
         sw_url = upload_to_drive(sw_path, os.path.basename(sw_path), folder_id)
         print(f"[DEBUG] Excels uploaded: HW→{hw_url}, SW→{sw_url}", flush=True)
 
-        # 6) Call Docx generator
+        # 6) Docx generator
         payload = {
             "session_id": session_id,
             "email": email,
@@ -283,13 +265,12 @@ def generate_assessment(session_id: str,
             **charts,
             **narratives
         }
-        docx_endpoint = f"{DOCX_SERVICE_URL.rstrip('/')}/generate_assessment"
-        print(f"[DEBUG] Posting to Docx service @ {docx_endpoint}", flush=True)
-        r = requests.post(docx_endpoint, json=payload, timeout=300)
-        r.raise_for_status()
-        docx_resp = r.json()
+        endpoint = f"{DOCX_SERVICE_URL.rstrip('/')}/generate_assessment"
+        print(f"[DEBUG] Posting to Docx service @ {endpoint}", flush=True)
+        resp = requests.post(endpoint, json=payload, timeout=300); resp.raise_for_status()
+        docx_resp = resp.json()
 
-        # 7) Download & re-upload DOCX/PPTX
+        # 7) Download & re-upload docs
         results = {
             "session_id": session_id,
             "gpt_module": "it_assessment",
@@ -300,7 +281,7 @@ def generate_assessment(session_id: str,
             ],
             **charts
         }
-        for field, url in (("docx_url","docx_url"), ("pptx_url","pptx_url")):
+        for field in ("docx_url", "pptx_url"):
             if docx_resp.get(field):
                 dl = requests.get(docx_resp[field]); dl.raise_for_status()
                 fname = os.path.basename(docx_resp[field])
@@ -310,11 +291,10 @@ def generate_assessment(session_id: str,
                 results[key] = upload_to_drive(local, fname, folder_id)
                 print(f"[DEBUG] Uploaded {field} → {results[key]}", flush=True)
 
-        # 8) Notify next module (market-gap)
+        # 8) Notify next
         notify_url = next_action_webhook or MARKET_GAP_WEBHOOK
         print(f"[DEBUG] Notifying next at {notify_url}", flush=True)
-        nt = requests.post(notify_url, json=results, timeout=60)
-        nt.raise_for_status()
+        nt = requests.post(notify_url, json=results, timeout=60); nt.raise_for_status()
 
         return results
 
