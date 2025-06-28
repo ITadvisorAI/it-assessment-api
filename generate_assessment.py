@@ -83,6 +83,30 @@ def ai_narrative(section_name: str, data_summary: dict) -> str:
     print(f"[DEBUG] ai_narrative → received {len(text.split())} words", flush=True)
     return text
 
+# Added helper to write DataFrames back into Excel templates
+
+def write_df_to_template(df: pd.DataFrame,
+                         template_path: str,
+                         out_path: str,
+                         sheet_name: str = "Data"):
+    """
+    Opens the Excel template, clears all rows beneath row 1 of 'sheet_name',
+    writes `df` back in, then saves to `out_path`. Charts on other sheets
+    will pick up the new data automatically.
+    """
+    wb = load_workbook(template_path)
+    ws = wb[sheet_name]
+
+    # remove old data rows
+    if ws.max_row > 1:
+        ws.delete_rows(2, ws.max_row - 1)
+
+    # write new data
+    for r_idx, row in enumerate(df.itertuples(index=False, name=None), start=2):
+        for c_idx, value in enumerate(row, start=1):
+            ws.cell(row=r_idx, column=c_idx, value=value)
+
+    wb.save(out_path)
 
 # ────────────────────────────────────────────────────────────────────────────────
 # Section Builders
@@ -182,7 +206,6 @@ def build_recommendations(hw_df, sw_df):
 def build_section_20_next_steps(hw_df, sw_df):
     return build_recommendations(hw_df, sw_df)
 
-
 # ────────────────────────────────────────────────────────────────────────────────
 # Core Assessment Generator
 # ────────────────────────────────────────────────────────────────────────────────
@@ -241,16 +264,13 @@ def generate_assessment(session_id: str,
 
         # 3) Generate & upload charts
         print("[DEBUG] Generating charts...", flush=True)
-        # 3) Generate & upload hardware charts
         charts = generate_visual_charts(hw_df, sw_df, workspace)
         for key, path in list(charts.items()):
             url = upload_to_drive(path, os.path.basename(path), folder_id)
             charts[key] = url
 
-        # 3b) Generate & upload software charts
         sw_tier_path   = os.path.join(workspace, "sw_tier_chart.png")
         sw_status_path = os.path.join(workspace, "sw_status_chart.png")
-        # Tier distribution
         if "Tier Total Score" in sw_df.columns:
             sw_df["Tier Total Score"].hist(bins=10)
             plt.title("SW Tier Distribution")
@@ -259,22 +279,8 @@ def generate_assessment(session_id: str,
                 charts["sw_tier_chart"] = upload_to_drive(
                     sw_tier_path, os.path.basename(sw_tier_path), folder_id
                 )
-            except Exception as e:
-                print(f"[ERROR] SW tier chart upload failed: {e}", flush=True)
-        else:
-            print("[DEBUG] Skipping SW tier chart – no 'Tier Total Score' column", flush=True)
-
-        # License status pie (if we have that column)
-        if "License Status" in sw_df.columns:
-            sw_df["License Status"].value_counts().plot.pie(autopct="%1.1f%%")
-            plt.title("SW License Status")
-            plt.savefig(sw_status_path); plt.clf()
-            try:
-                charts["sw_status_chart"] = upload_to_drive(
-                    sw_status_path, os.path.basename(sw_status_path), folder_id
-                )
-            except Exception as e:
-                print(f"[ERROR] SW status chart upload failed: {e}", flush=True)
+            except Exception:
+                print("[DEBUG] Failed to upload SW tier chart", flush=True)
         else:
             print("[DEBUG] Skipping SW status chart – no 'License Status' column", flush=True)
 
@@ -311,8 +317,6 @@ def generate_assessment(session_id: str,
             "session_id": session_id,
             "email": email,
             "goal": goal,
-            "hw_gap_url": hw_url,
-            "sw_gap_url": sw_url,
             **charts,
             **narratives
         }
@@ -344,11 +348,13 @@ def generate_assessment(session_id: str,
     except Exception as e:
         print("[ERROR] generate_assessment exception:", str(e), flush=True)
         traceback.print_exc()
-        return {"error": str(e)}
+        # propagate to caller
 
-
-def process_assessment(payload: dict) -> dict:
-    return generate_assessment(
+# Entry point for container
+if __name__ == "__main__":
+    payload = json.loads(sys.stdin.read())
+    print("📥 Received trigger to start assessment", payload, flush=True)
+    result = generate_assessment(
         session_id=payload.get("session_id", ""),
         email=payload.get("email", ""),
         goal=payload.get("goal", ""),
@@ -356,3 +362,4 @@ def process_assessment(payload: dict) -> dict:
         next_action_webhook=payload.get("next_action_webhook", ""),
         folder_id=payload.get("folder_id", "")
     )
+    print("✅ Assessment completed. Returning result.", result, flush=True)
