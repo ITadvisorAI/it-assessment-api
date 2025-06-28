@@ -11,18 +11,19 @@ from drive_utils import upload_to_drive
 # ────────────────────────────────────────────────────────────────────────────────
 # Configuration & Constants
 # ────────────────────────────────────────────────────────────────────────────────
-TEMPLATES_DIR      = os.path.join(os.path.dirname(__file__), "templates")
-HW_TEMPLATE_PATH   = os.path.join(TEMPLATES_DIR, "HWGapAnalysis.xlsx")
-SW_TEMPLATE_PATH   = os.path.join(TEMPLATES_DIR, "SWGapAnalysis.xlsx")
-CLASSIFICATION_PATH= os.path.join(TEMPLATES_DIR, "ClassificationTier.xlsx")
+TEMPLATES_DIR       = os.path.join(os.path.dirname(__file__), "templates")
+HW_TEMPLATE_PATH    = os.path.join(TEMPLATES_DIR, "HWGapAnalysis.xlsx")
+SW_TEMPLATE_PATH    = os.path.join(TEMPLATES_DIR, "SWGapAnalysis.xlsx")
+CLASSIFICATION_PATH = os.path.join(TEMPLATES_DIR, "ClassificationTier.xlsx")
 
-DOCX_SERVICE_URL   = os.getenv("DOCX_SERVICE_URL",   "https://docx-generator-api.onrender.com")
-MARKET_GAP_WEBHOOK = os.getenv("MARKET_GAP_WEBHOOK", "https://market-gap-analysis.onrender.com/start_market_gap")
+DOCX_SERVICE_URL    = os.getenv("DOCX_SERVICE_URL",   "https://docx-generator-api.onrender.com")
+MARKET_GAP_WEBHOOK  = os.getenv("MARKET_GAP_WEBHOOK", "https://market-gap-analysis.onrender.com/start_market_gap")
 
-OPENAI_MODEL       = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-OPENAI_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", "0.7"))
+OPENAI_MODEL        = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_TEMPERATURE  = float(os.getenv("OPENAI_TEMPERATURE", "0.7"))
 
-client = OpenAI()  # new v1 client
+# Instantiate OpenAI client (v1)
+client = OpenAI()
 
 print("[DEBUG] Loading Excel templates...", flush=True)
 HW_TEMPLATE_DF    = pd.read_excel(HW_TEMPLATE_PATH)
@@ -82,7 +83,7 @@ def ai_narrative(section_name: str, data_summary: dict) -> str:
 
 
 # ────────────────────────────────────────────────────────────────────────────────
-# Section Builders (trimmed payloads for Sections 3 & 4)
+# Section Builders
 # ────────────────────────────────────────────────────────────────────────────────
 def build_score_summary(hw_df, sw_df):
     return {"text": f"Analyzed {len(hw_df)} hardware items and {len(sw_df)} software items."}
@@ -95,24 +96,23 @@ def build_section_2_overview(hw_df, sw_df):
     else:
         expired, compliant = 0, 0
     return {
-        "total_devices":       len(hw_df),
-        "total_applications":  len(sw_df),
-        "healthy_devices":     healthy,
-        "compliant_licenses":  compliant
+        "total_devices":      len(hw_df),
+        "total_applications": len(sw_df),
+        "healthy_devices":    healthy,
+        "compliant_licenses": compliant
     }
 
 def build_section_3_inventory_hardware(hw_df, sw_df):
+    total = len(hw_df)
     sample = hw_df.head(10).to_dict(orient="records")
-    return {
-        "total_hardware_items": len(hw_df),
-        "sample_hardware_items": sample
-    }
+    return {"total_hardware_items": total, "sample_hardware_items": sample}
 
 def build_section_4_inventory_software(hw_df, sw_df):
+    total = len(sw_df)
     by_cat = sw_df.get("Category", pd.Series()).value_counts().to_dict()
-    top5   = sw_df.get("App Name", pd.Series()).value_counts().head(5).to_dict()
+    top5 = sw_df.get("App Name", pd.Series()).value_counts().head(5).to_dict()
     return {
-        "total_software_items": len(sw_df),
+        "total_software_items": total,
         "software_by_category": by_cat,
         "top_5_apps":           top5
     }
@@ -182,7 +182,7 @@ def build_section_20_next_steps(hw_df, sw_df):
 
 
 # ────────────────────────────────────────────────────────────────────────────────
-# Core Assessment Generator (unchanged except above)
+# Core Assessment Generator
 # ────────────────────────────────────────────────────────────────────────────────
 def generate_assessment(session_id: str,
                         email: str,
@@ -192,38 +192,45 @@ def generate_assessment(session_id: str,
                         folder_id: str) -> dict:
     print(f"[DEBUG] → Starting assessment for session '{session_id}'", flush=True)
     try:
+        # Prepare workspace
         workspace = os.path.join(os.getcwd(), session_id)
         os.makedirs(workspace, exist_ok=True)
         print(f"[DEBUG] Workspace created at {workspace}", flush=True)
 
-        # 1) Download & ingest
-        hw_df = pd.DataFrame(); sw_df = pd.DataFrame()
+        # 1) Download & ingest files
+        hw_df = pd.DataFrame()
+        sw_df = pd.DataFrame()
         for f in files:
-            name = f.get("file_name","unknown.xlsx"); url = f.get("file_url","")
+            name = f.get("file_name", "unknown")
+            url  = f.get("file_url", "")
             local = os.path.join(workspace, name)
-            r = requests.get(url); r.raise_for_status()
-            with open(local, "wb") as fp: fp.write(r.content)
+            resp = requests.get(url); resp.raise_for_status()
+            with open(local, "wb") as fp:
+                fp.write(resp.content)
+
+            # only load Excel or CSV
             ext = os.path.splitext(name)[1].lower()
             if ext in (".xls", ".xlsx"):
-                  temp_df = pd.read_excel(local)
+                temp_df = pd.read_excel(local)
             elif ext == ".csv":
-                  temp_df = pd.read_csv(local)
+                temp_df = pd.read_csv(local)
             else:
-                  print(f"[DEBUG] Skipping non-spreadsheet file {name}", flush=True)
-                  continue
+                print(f"[DEBUG] Skipping non-spreadsheet file {name}", flush=True)
+                continue
+
             temp_df.columns = [c.strip() for c in temp_df.columns]
             inv_type = detect_inventory_type(temp_df, name)
             print(f"[DEBUG] File '{name}' → {inv_type}", flush=True)
-            if inv_type=="hw":
+            if inv_type == "hw":
                 hw_df = pd.concat([hw_df, temp_df], ignore_index=True)
-            elif inv_type=="sw":
+            elif inv_type == "sw":
                 sw_df = pd.concat([sw_df, temp_df], ignore_index=True)
             else:
-                print(f"[WARN] Skipping unknown inventory '{name}'", flush=True)
+                print(f"[WARN] Unknown inventory, skipping {name}", flush=True)
 
         print(f"[DEBUG] After ingestion: hw_df={hw_df.shape}, sw_df={sw_df.shape}", flush=True)
 
-        # 2) Merge & classify
+        # 2) Merge templates, lookup replacements, classify
         hw_df = merge_with_template(HW_TEMPLATE_DF.copy(), hw_df)
         sw_df = merge_with_template(SW_TEMPLATE_DF.copy(), sw_df)
         hw_df = suggest_hw_replacements(hw_df)
@@ -231,7 +238,7 @@ def generate_assessment(session_id: str,
         hw_df = apply_classification(hw_df)
         sw_df = apply_classification(sw_df)
 
-        # 3) Charts
+        # 3) Generate & upload charts
         print("[DEBUG] Generating charts...", flush=True)
         charts = generate_visual_charts(hw_df, sw_df, workspace)
         for key, path in list(charts.items()):
@@ -242,7 +249,7 @@ def generate_assessment(session_id: str,
             except Exception as ex:
                 print(f"[ERROR] Chart upload failed for {key}: {ex}", flush=True)
 
-        # 4) Narratives
+        # 4) Build AI narratives
         section_fns = [
             build_score_summary, build_section_2_overview, build_section_3_inventory_hardware,
             build_section_4_inventory_software, build_section_5_classification_distribution,
@@ -257,7 +264,8 @@ def generate_assessment(session_id: str,
         ]
         narratives = {}
         for idx, fn in enumerate(section_fns, start=1):
-            name = fn.__name__; summary = fn(hw_df, sw_df)
+            name = fn.__name__
+            summary = fn(hw_df, sw_df)
             narratives[f"content_{idx}"] = ai_narrative(name, summary)
 
         # 5) Write & upload Excels
@@ -281,34 +289,45 @@ def generate_assessment(session_id: str,
         }
         endpoint = f"{DOCX_SERVICE_URL.rstrip('/')}/generate_assessment"
         print(f"[DEBUG] Posting to Docx service @ {endpoint}", flush=True)
-        resp = requests.post(endpoint, json=payload, timeout=300); resp.raise_for_status()
+        resp = requests.post(endpoint, json=payload, timeout=300)
+        resp.raise_for_status()
         docx_resp = resp.json()
 
-        # 7) Download & re-upload DOCX/PPTX
-        results = {
-            "session_id": session_id,
-            "gpt_module": "it_assessment",
-            "status": "complete",
-            "files": [
-                {"file_name": os.path.basename(hw_path), "drive_url": hw_url},
-                {"file_name": os.path.basename(sw_path), "drive_url": sw_url}
-            ],
-            **charts
-        }
+        # 7) Build unified files list for downstream
+        files_payload = [
+            {"file_name": os.path.basename(hw_path), "file_url": hw_url, "type": "hw_gap_analysis"},
+            {"file_name": os.path.basename(sw_path), "file_url": sw_url, "type": "sw_gap_analysis"},
+        ]
+        # add charts
+        for chart_key, chart_url in charts.items():
+            files_payload.append({
+                "file_name": f"{chart_key}.png",
+                "file_url": chart_url,
+                "type": "chart"
+            })
+        # add docx/pptx
         for field in ("docx_url", "pptx_url"):
             if docx_resp.get(field):
-                dl = requests.get(docx_resp[field]); dl.raise_for_status()
-                fname = os.path.basename(docx_resp[field])
-                local = os.path.join(workspace, fname)
-                with open(local, "wb") as fp: fp.write(dl.content)
-                key = "file_3_drive_url" if field=="docx_url" else "file_4_drive_url"
-                results[key] = upload_to_drive(local, fname, folder_id)
-                print(f"[DEBUG] Uploaded {field} → {results[key]}", flush=True)
+                url = docx_resp[field]
+                ftype = "docx_report" if field == "docx_url" else "pptx_report"
+                files_payload.append({
+                    "file_name": os.path.basename(url),
+                    "file_url": url,
+                    "type": ftype
+                })
 
-        # 8) Notify downstream
+        results = {
+            "session_id":  session_id,
+            "gpt_module":  "it_assessment",
+            "status":      "complete",
+            "files":       files_payload
+        }
+
+        # 8) Notify next module
         notify_url = next_action_webhook or MARKET_GAP_WEBHOOK
         print(f"[DEBUG] Notifying next at {notify_url}", flush=True)
-        nt = requests.post(notify_url, json=results, timeout=60); nt.raise_for_status()
+        nt = requests.post(notify_url, json=results, timeout=60)
+        nt.raise_for_status()
 
         return results
 
@@ -317,12 +336,13 @@ def generate_assessment(session_id: str,
         traceback.print_exc()
         return {"error": str(e)}
 
+
 def process_assessment(payload: dict) -> dict:
     return generate_assessment(
-        session_id=payload.get("session_id",""),
-        email=payload.get("email",""),
-        goal=payload.get("goal",""),
+        session_id=payload.get("session_id", ""),
+        email=payload.get("email", ""),
+        goal=payload.get("goal", ""),
         files=payload.get("files", []),
-        next_action_webhook=payload.get("next_action_webhook",""),
-        folder_id=payload.get("folder_id","")
+        next_action_webhook=payload.get("next_action_webhook", ""),
+        folder_id=payload.get("folder_id", "")
     )
