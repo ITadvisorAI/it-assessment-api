@@ -203,7 +203,14 @@ def generate_assessment(session_id: str,
             local = os.path.join(workspace, name)
             r = requests.get(url); r.raise_for_status()
             with open(local, "wb") as fp: fp.write(r.content)
-            temp_df = pd.read_excel(local)
+            ext = os.path.splitext(name)[1].lower()
+            if ext in (".xls", ".xlsx"):
+                  temp_df = pd.read_excel(local)
+            elif ext == ".csv":
+                  temp_df = pd.read_csv(local)
+            else:
+                  print(f"[DEBUG] Skipping non-spreadsheet file {name}", flush=True)
+                  continue
             temp_df.columns = [c.strip() for c in temp_df.columns]
             inv_type = detect_inventory_type(temp_df, name)
             print(f"[DEBUG] File '{name}' → {inv_type}", flush=True)
