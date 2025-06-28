@@ -93,12 +93,16 @@ def build_score_summary(hw_df, sw_df):
 
 def build_section_2_overview(hw_df, sw_df):
     healthy = int((hw_df.get("Tier Total Score", 0) >= 75).sum())
-    compliant = int((sw_df.get("License Status", "") != "Expired").sum())
+    if "License Status" in sw_df.columns:
+        expired   = int((sw_df["License Status"] == "Expired").sum())
+        compliant = int(len(sw_df) - expired)
+    else:
+        expired, compliant = 0, 0
     return {
         "total_devices": len(hw_df),
         "total_applications": len(sw_df),
-        "healthy_devices": healthy,
-        "compliant_licenses": compliant
+        "healthy_devices":     healthy,
+        "compliant_licenses":  compliant  
     }
 
 def build_section_3_inventory_hardware(hw_df, sw_df):
@@ -117,8 +121,11 @@ def build_section_6_lifecycle_status(hw_df, sw_df):
     return {"lifecycle_status": []}
 
 def build_section_7_software_compliance(hw_df, sw_df):
-    expired = int((sw_df.get("License Status", "") == "Expired").sum())
-    valid   = int(len(sw_df) - expired)
+    if "License Status" in sw_df.columns:
+        expired = int((sw_df["License Status"] == "Expired").sum())
+        valid   = int(len(sw_df) - expired)
+    else:
+        expired, valid = 0, 0
     return {"valid_licenses": valid, "expired_licenses": expired}
 
 def build_section_8_security_posture(hw_df, sw_df):
