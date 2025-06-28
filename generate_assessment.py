@@ -110,7 +110,7 @@ def build_section_3_inventory_hardware(hw_df, sw_df):
 def build_section_4_inventory_software(hw_df, sw_df):
     total = len(sw_df)
     by_cat = sw_df.get("Category", pd.Series()).value_counts().to_dict()
-    top5 = sw_df.get("App Name", pd.Series()).value_counts().head(5).to_dict()
+    top5   = sw_df.get("App Name", pd.Series()).value_counts().head(5).to_dict()
     return {
         "total_software_items": total,
         "software_by_category": by_cat,
@@ -197,7 +197,7 @@ def generate_assessment(session_id: str,
         os.makedirs(workspace, exist_ok=True)
         print(f"[DEBUG] Workspace created at {workspace}", flush=True)
 
-        # 1) Download & ingest files
+        # 1) Download & ingest spreadsheets
         hw_df = pd.DataFrame()
         sw_df = pd.DataFrame()
         for f in files:
@@ -208,7 +208,6 @@ def generate_assessment(session_id: str,
             with open(local, "wb") as fp:
                 fp.write(resp.content)
 
-            # only load Excel or CSV
             ext = os.path.splitext(name)[1].lower()
             if ext in (".xls", ".xlsx"):
                 temp_df = pd.read_excel(local)
@@ -230,7 +229,7 @@ def generate_assessment(session_id: str,
 
         print(f"[DEBUG] After ingestion: hw_df={hw_df.shape}, sw_df={sw_df.shape}", flush=True)
 
-        # 2) Merge templates, lookup replacements, classify
+        # 2) Merge into templates, enrich, classify
         hw_df = merge_with_template(HW_TEMPLATE_DF.copy(), hw_df)
         sw_df = merge_with_template(SW_TEMPLATE_DF.copy(), sw_df)
         hw_df = suggest_hw_replacements(hw_df)
@@ -264,9 +263,7 @@ def generate_assessment(session_id: str,
         ]
         narratives = {}
         for idx, fn in enumerate(section_fns, start=1):
-            name = fn.__name__
-            summary = fn(hw_df, sw_df)
-            narratives[f"content_{idx}"] = ai_narrative(name, summary)
+            narratives[f"content_{idx}"] = ai_narrative(fn.__name__, fn(hw_df, sw_df))
 
         # 5) Write & upload Excels
         hw_path = os.path.join(workspace, "HWGapAnalysis.xlsx")
@@ -293,37 +290,18 @@ def generate_assessment(session_id: str,
         resp.raise_for_status()
         docx_resp = resp.json()
 
-        # 7) Build unified files list for downstream
-        files_payload = [
-            {"file_name": os.path.basename(hw_path), "file_url": hw_url, "type": "hw_gap_analysis"},
-            {"file_name": os.path.basename(sw_path), "file_url": sw_url, "type": "sw_gap_analysis"},
-        ]
-        # add charts
-        for chart_key, chart_url in charts.items():
-            files_payload.append({
-                "file_name": f"{chart_key}.png",
-                "file_url": chart_url,
-                "type": "chart"
-            })
-        # add docx/pptx
-        for field in ("docx_url", "pptx_url"):
-            if docx_resp.get(field):
-                url = docx_resp[field]
-                ftype = "docx_report" if field == "docx_url" else "pptx_report"
-                files_payload.append({
-                    "file_name": os.path.basename(url),
-                    "file_url": url,
-                    "type": ftype
-                })
-
+        # 7) Notify downstream using original structure
         results = {
-            "session_id":  session_id,
-            "gpt_module":  "it_assessment",
-            "status":      "complete",
-            "files":       files_payload
+            "session_id": session_id,
+            "gpt_module": "it_assessment",
+            "status": "complete",
+            "files": [
+                {"file_name": os.path.basename(hw_path), "drive_url": hw_url},
+                {"file_name": os.path.basename(sw_path), "drive_url": sw_url}
+            ],
+            **charts,
+            **{"docx_url": docx_resp.get("docx_url"), "pptx_url": docx_resp.get("pptx_url")}
         }
-
-        # 8) Notify next module
         notify_url = next_action_webhook or MARKET_GAP_WEBHOOK
         print(f"[DEBUG] Notifying next at {notify_url}", flush=True)
         nt = requests.post(notify_url, json=results, timeout=60)
