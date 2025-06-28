@@ -251,16 +251,32 @@ def generate_assessment(session_id: str,
         sw_tier_path   = os.path.join(workspace, "sw_tier_chart.png")
         sw_status_path = os.path.join(workspace, "sw_status_chart.png")
         # Tier distribution
-        sw_df["Tier Total Score"].hist(bins=10)
-        plt.title("SW Tier Distribution")
-        plt.savefig(sw_tier_path); plt.clf()
-        # License status pie
-        sw_df["License Status"].value_counts().plot.pie(autopct="%1.1f%%")
-        plt.title("SW License Status")
-        plt.savefig(sw_status_path); plt.clf()
-        for path, key in [(sw_tier_path, "sw_tier_chart"), (sw_status_path, "sw_status_chart")]:
-            url = upload_to_drive(path, os.path.basename(path), folder_id)
-            charts[key] = url
+        if "Tier Total Score" in sw_df.columns:
+            sw_df["Tier Total Score"].hist(bins=10)
+            plt.title("SW Tier Distribution")
+            plt.savefig(sw_tier_path); plt.clf()
+            try:
+                charts["sw_tier_chart"] = upload_to_drive(
+                    sw_tier_path, os.path.basename(sw_tier_path), folder_id
+                )
+            except Exception as e:
+                print(f"[ERROR] SW tier chart upload failed: {e}", flush=True)
+        else:
+            print("[DEBUG] Skipping SW tier chart – no 'Tier Total Score' column", flush=True)
+
+        # License status pie (if we have that column)
+        if "License Status" in sw_df.columns:
+            sw_df["License Status"].value_counts().plot.pie(autopct="%1.1f%%")
+            plt.title("SW License Status")
+            plt.savefig(sw_status_path); plt.clf()
+            try:
+                charts["sw_status_chart"] = upload_to_drive(
+                    sw_status_path, os.path.basename(sw_status_path), folder_id
+                )
+            except Exception as e:
+                print(f"[ERROR] SW status chart upload failed: {e}", flush=True)
+        else:
+            print("[DEBUG] Skipping SW status chart – no 'License Status' column", flush=True)
 
         # 4) Build AI narratives
         section_fns = [
