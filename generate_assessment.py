@@ -182,14 +182,17 @@ def generate_assessment(
             with open(url, "rb") as src, open(local, "wb") as dst:
                 dst.write(src.read())
         print(f"[DEBUG] Saved to {local}", flush=True)
+        # First asset_inventory -> hardware, second -> software
         if file.get("type") == "asset_inventory":
             if hw_file_path is None:
                 hw_file_path = local
             else:
                 sw_file_path = local
+        # Also accept explicit gap_working for software
         elif file.get("type") == "gap_working" and sw_file_path is None:
             sw_file_path = local
 
+    # Merge & classify
     def merge_with_template(df_template, df_inv):
         for c in df_inv.columns:
             if c not in df_template.columns:
@@ -211,6 +214,7 @@ def generate_assessment(
         sw_df = suggest_sw_replacements(sw_df)
         sw_df = apply_classification(sw_df)
 
+    # Charts
     chart_paths = generate_visual_charts(hw_df, sw_df, session_id)
     for name, local_path in chart_paths.items():
         try:
@@ -219,18 +223,21 @@ def generate_assessment(
         except Exception as ex:
             print(f"❌ Failed upload chart {name}: {ex}", flush=True)
 
+    # Save & upload GAP sheets
     links = {}
     for idx, df in enumerate((hw_df, sw_df), start=1):
         if not df.empty:
-            label = ['HW','SW'][idx-1]
-            path = os.path.join(session_path, f"{label}GapAnalysis_{session_id}.xlsx")
+            file_label = ['HW', 'SW'][idx - 1]
+            path = os.path.join(session_path, f"{file_label}GapAnalysis_{session_id}.xlsx")
             df.to_excel(path, index=False)
             links[f"file_{idx}_drive_url"] = upload_to_drive(path, os.path.basename(path), session_id)
 
+    # Build narratives
     score_summary = build_score_summary(hw_df, sw_df)
     recommendations = build_recommendations(hw_df, sw_df)
     key_findings = build_key_findings(hw_df, sw_df)
 
+    # Section content
     section_2_overview = build_section_2_overview(hw_df, sw_df)
     section_3_hardware_breakdown = build_section_3_hardware_breakdown(hw_df, sw_df)
     section_4_software_breakdown = build_section_4_software_breakdown(hw_df, sw_df)
@@ -249,12 +256,14 @@ def generate_assessment(
     section_18_sustainability = build_section_18_sustainability(hw_df, sw_df)
     section_20_next_steps = build_section_20_next_steps(hw_df, sw_df)
 
+    # Appendices
     try:
         classification_matrix_md = CLASSIFICATION_DF.to_markdown(index=False)
     except Exception:
         classification_matrix_md = CLASSIFICATION_DF.to_csv(index=False)
     data_sources_text = "Data sources: asset inventory files, GAP templates, classification tiers."
 
+    # Build full payload
     payload = {
         "session_id": session_id,
         "email": email,
@@ -353,5 +362,5 @@ def process_assessment(data):
 
     print("[DEBUG] Entered process_assessment()", flush=True)
     return generate_assessment(
-       	session_id, email, goal, files, next_action_webhook, folder_id
+        session_id, email, goal, files, next_action_webhook, folder_id
     )
