@@ -8,7 +8,7 @@ import pandas as pd
 import openai
 from market_lookup import suggest_hw_replacements, suggest_sw_replacements
 from visualization import generate_visual_charts
-from drive_utils import upload_to_drive, create_folder
+from drive_utils import upload_to_drive
 
 # If you need to use python-docx or python-pptx directly, import here; otherwise, we use the docx-generator service
 # from docx import Document
@@ -16,7 +16,7 @@ from drive_utils import upload_to_drive, create_folder
 # from pptx.util import Inches
 
 # Configure logging
-logging.basicConfig(level=logging.DEBUG, format='[%(asctime)s] %(levelname)s:%(message)s')
+tlogging.basicConfig(level=logging.DEBUG, format='[%(asctime)s] %(levelname)s:%(message)s')
 
 # Constants and template loading
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
@@ -145,13 +145,8 @@ def generate_assessment(
     os.makedirs(session_path, exist_ok=True)
     logging.info(f"Session directory: {session_path}")
 
-    # Create Drive folder
-    try:
-        session_folder = create_folder(session_id, parent=folder_id)
-        logging.info(f"Created/verified Drive folder: {session_folder}")
-    except Exception as e:
-        session_folder = folder_id
-        logging.warning(f"Using fallback folder_id: {session_folder} (error: {e})")
+    # Use provided Drive folder ID
+    session_folder = folder_id
 
     # Download & map files
     hw_path = sw_path = None
@@ -179,7 +174,7 @@ def generate_assessment(
     sw_df = pd.read_excel(sw_path) if sw_path else pd.DataFrame()
     logging.info(f"Loaded hw_df: {len(hw_df)} rows, sw_df: {len(sw_df)} rows")
 
-    # Merge templ
+    # Merge template, suggest, classify
     if not hw_df.empty:
         hw_df = merge_with_template(HW_BASE_DF.copy(), hw_df)
         hw_df = suggest_hw_replacements(hw_df)
@@ -223,7 +218,7 @@ def generate_assessment(
             logging.error(f"Narrative {fn.__name__} error: {e}")
 
     # Assemble payload
-    payload = {"session_id": session_id, "email": email, "goal": goal, **links, **narratives}
+    payload = {"session_id": session_id, "email": email, "goal": goal, **links, **narraries}
     # Call docx service
     try:
         resp = requests.post(f"{DOCX_SERVICE_URL}/generate_assessment", json=payload)
@@ -260,7 +255,7 @@ def generate_assessment(
             logging.error(f"Next webhook error: {e}")
 
     logging.info(f"Assessment complete for {session_id}")
-    return {"session_id": session_id, **links, **narratives}
+    return {"session_id": session_id, **links, **narraries}
 
 
 def process_assessment(data: dict) -> dict:
