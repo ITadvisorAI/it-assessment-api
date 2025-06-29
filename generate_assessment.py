@@ -1,367 +1,366 @@
 import os
-import sys
-import json
-import traceback
+import re
 import pandas as pd
 import requests
-from openai import OpenAI
-from openpyxl import load_workbook
-import matplotlib.pyplot as plt
 from market_lookup import suggest_hw_replacements, suggest_sw_replacements
 from visualization import generate_visual_charts
 from drive_utils import upload_to_drive
 
-# ────────────────────────────────────────────────────────────────────────────────
-# Configuration & Constants
-# ────────────────────────────────────────────────────────────────────────────────
-TEMPLATES_DIR       = os.path.join(os.path.dirname(__file__), "templates")
-HW_TEMPLATE_PATH    = os.path.join(TEMPLATES_DIR, "HWGapAnalysis.xlsx")
-SW_TEMPLATE_PATH    = os.path.join(TEMPLATES_DIR, "SWGapAnalysis.xlsx")
-CLASSIFICATION_PATH = os.path.join(TEMPLATES_DIR, "ClassificationTier.xlsx")
+from docx import Document
+from pptx import Presentation
+from pptx.util import Inches
 
-DOCX_SERVICE_URL    = os.getenv("DOCX_SERVICE_URL",   "https://docx-generator-api.onrender.com")
-MARKET_GAP_WEBHOOK  = os.getenv("MARKET_GAP_WEBHOOK", "https://market-gap-analysis.onrender.com/start_market_gap")
+TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
+OUTPUT_DIR = "temp_sessions"
 
-OPENAI_MODEL        = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-OPENAI_TEMPERATURE  = float(os.getenv("OPENAI_TEMPERATURE", "0.7"))
+# ──────────────────────────────────────────────
+# Cache templates at import time (only once)
+print("[DEBUG] Loading template spreadsheets into memory...", flush=True)
+HW_BASE_DF = pd.read_excel(os.path.join(TEMPLATES_DIR, "HWGapAnalysis.xlsx"))
+SW_BASE_DF = pd.read_excel(os.path.join(TEMPLATES_DIR, "SWGapAnalysis.xlsx"))
+CLASSIFICATION_DF = pd.read_excel(os.path.join(TEMPLATES_DIR, "ClassificationTier.xlsx"))
+print("[DEBUG] Templates cached successfully", flush=True)
+# ──────────────────────────────────────────────
 
-# Instantiate OpenAI client (v1)
-client = OpenAI()
-
-print("[DEBUG] Loading Excel templates...", flush=True)
-HW_TEMPLATE_DF    = pd.read_excel(HW_TEMPLATE_PATH)
-SW_TEMPLATE_DF    = pd.read_excel(SW_TEMPLATE_PATH)
-CLASSIFICATION_DF = pd.read_excel(CLASSIFICATION_PATH)
-print(
-    "[DEBUG] Templates loaded:",
-    f"HW={HW_TEMPLATE_DF.shape}",
-    f"SW={SW_TEMPLATE_DF.shape}",
-    f"CL={CLASSIFICATION_DF.shape}",
-    flush=True
+DOCX_SERVICE_URL = os.getenv(
+    "DOCX_SERVICE_URL",
+    "https://docx-generator-api.onrender.com"
 )
+MARKET_GAP_WEBHOOK = "https://market-gap-analysis.onrender.com/start_market_gap"
 
-# ────────────────────────────────────────────────────────────────────────────────
-# Utility Functions
-# ────────────────────────────────────────────────────────────────────────────────
-def merge_with_template(template_df: pd.DataFrame, inv_df: pd.DataFrame) -> pd.DataFrame:
-    for col in inv_df.columns:
-        if col not in template_df.columns:
-            template_df[col] = pd.NA
-    inv_df = inv_df.reindex(columns=template_df.columns, fill_value=pd.NA)
-    merged = pd.concat([template_df, inv_df], ignore_index=True)
-    print(f"[DEBUG] merge_with_template: merged shape {merged.shape}", flush=True)
-    return merged
 
-def apply_classification(df: pd.DataFrame) -> pd.DataFrame:
-    if "Tier Total Score" in df.columns:
-        merged = df.merge(
-            CLASSIFICATION_DF,
-            how="left",
-            left_on="Tier Total Score",
-            right_on="Score"
-        )
-        print(f"[DEBUG] apply_classification: result shape {merged.shape}", flush=True)
-        return merged
-    return df
-
-def detect_inventory_type(df: pd.DataFrame, filename: str) -> str:
-    cols = [c.lower() for c in df.columns]
-    name = filename.lower()
-    if any("device" in c for c in cols) or "server" in name:
-        return "hw"
-    if any("app" in c for c in cols) or "software" in name:
-        return "sw"
-    return ""
-
-def ai_narrative(section_name: str, data_summary: dict) -> str:
-    prompt = (
-        f"You are an IT infrastructure analyst. "
-        f"Write a concise narrative for the section '{section_name}' "
-        f"based on this data summary:\n{json.dumps(data_summary, indent=2)}"
-    )
-    print(f"[DEBUG] ai_narrative → prompting for {section_name}", flush=True)
-    resp = client.chat.completions.create(
-        model=OPENAI_MODEL,
-        temperature=OPENAI_TEMPERATURE,
-        messages=[
-            {"role": "system", "content": "You draft professional IT infrastructure analysis narratives."},
-            {"role": "user",   "content": prompt}
-        ]
-    )
-    text = resp.choices[0].message.content.strip()
-    print(f"[DEBUG] ai_narrative → received {len(text.split())} words", flush=True)
-    return text
-
-def write_df_to_template(
-    df: pd.DataFrame,
-    template_path: str,
-    out_path: str,
-    sheet_name: str = "Data"
-):
-    """
-    Opens the Excel template, clears all rows beneath row 1 of 'sheet_name',
-    writes `df` back in, then saves to `out_path`. Charts on other sheets
-    will pick up the new data automatically.
-    """
-    wb = load_workbook(template_path)
-    ws = wb[sheet_name]
-
-    # remove existing data rows
-    if ws.max_row > 1:
-        ws.delete_rows(2, ws.max_row - 1)
-
-    # write DataFrame rows
-    for r_idx, row in enumerate(df.itertuples(index=False, name=None), start=2):
-        for c_idx, val in enumerate(row, start=1):
-            ws.cell(row=r_idx, column=c_idx, value=val)
-
-    wb.save(out_path)
-
-# ────────────────────────────────────────────────────────────────────────────────
-# Section Builders
-# ────────────────────────────────────────────────────────────────────────────────
 def build_score_summary(hw_df, sw_df):
-    return {"text": f"Analyzed {len(hw_df)} hardware items and {len(sw_df)} software items."}
+    hw_count = len(hw_df) if hw_df is not None else 0
+    sw_count = len(sw_df) if sw_df is not None else 0
+    return (
+        f"Your hardware inventory contains {hw_count} items, "
+        f"and your software inventory contains {sw_count} items."
+    )
 
-def build_section_2_overview(hw_df, sw_df):
-    healthy = int((hw_df.get("Tier Total Score", 0) >= 75).sum())
-    if "License Status" in sw_df.columns:
-        expired   = int((sw_df["License Status"] == "Expired").sum())
-        compliant = int(len(sw_df) - expired)
-    else:
-        expired, compliant = 0, 0
-    return {
-        "total_devices":      len(hw_df),
-        "total_applications": len(sw_df),
-        "healthy_devices":    healthy,
-        "compliant_licenses": compliant
-    }
-
-def build_section_3_inventory_hardware(hw_df, sw_df):
-    total = len(hw_df)
-    sample = hw_df.head(10).to_dict(orient="records")
-    return {"total_hardware_items": total, "sample_hardware_items": sample}
-
-def build_section_4_inventory_software(hw_df, sw_df):
-    total = len(sw_df)
-    by_cat = sw_df.get("Category", pd.Series()).value_counts().to_dict()
-    top5   = sw_df.get("App Name", pd.Series()).value_counts().head(5).to_dict()
-    return {
-        "total_software_items": total,
-        "software_by_category": by_cat,
-        "top_5_apps":           top5
-    }
-
-def build_section_5_classification_distribution(hw_df, sw_df):
-    dist = hw_df.get("Category", pd.Series()).value_counts().to_dict()
-    return {"classification_distribution": dist}
-
-def build_section_6_lifecycle_status(hw_df, sw_df):
-    return {"lifecycle_status": []}
-
-def build_section_7_software_compliance(hw_df, sw_df):
-    if "License Status" in sw_df.columns:
-        expired = int((sw_df["License Status"] == "Expired").sum())
-        valid   = int(len(sw_df) - expired)
-    else:
-        expired, valid = 0, 0
-    return {"valid_licenses": valid, "expired_licenses": expired}
-
-def build_section_8_security_posture(hw_df, sw_df):
-    return {"vulnerabilities": []}
-
-def build_section_9_performance(hw_df, sw_df):
-    return {"performance_metrics": []}
-
-def build_section_10_reliability(hw_df, sw_df):
-    return {"reliability_metrics": []}
-
-def build_section_11_scalability(hw_df, sw_df):
-    return {"scalability_opportunities": []}
-
-def build_section_12_legacy_technical_debt(hw_df, sw_df):
-    return {"legacy_issues": []}
-
-def build_section_13_obsolete_risk(hw_df, sw_df):
-    risks = []
-    if not hw_df.empty:
-        low_hw = hw_df[hw_df["Tier Total Score"] < 30]
-        risks.append({"hardware": low_hw.to_dict(orient="records")})
-    if not sw_df.empty:
-        low_sw = sw_df[sw_df["Tier Total Score"] < 30]
-        risks.append({"software": low_sw.to_dict(orient="records")})
-    return {"risks": risks}
-
-def build_section_14_cloud_migration(hw_df, sw_df):
-    return {"cloud_migration": []}
-
-def build_section_15_strategic_alignment(hw_df, sw_df):
-    return {"alignment": []}
-
-def build_section_16_business_impact(hw_df, sw_df):
-    return {"business_impact": []}
-
-def build_section_17_financial_implications(hw_df, sw_df):
-    return {"financial_implications": []}
-
-def build_section_18_environmental_sustainability(hw_df, sw_df):
-    return {"environmental_sustainability": []}
 
 def build_recommendations(hw_df, sw_df):
-    hw_recs = suggest_hw_replacements(hw_df).head(5).to_dict(orient="records") if not hw_df.empty else []
-    sw_recs = suggest_sw_replacements(sw_df).head(5).to_dict(orient="records") if not sw_df.empty else []
-    return {"hardware_replacements": hw_recs, "software_replacements": sw_recs}
+    recs = []
+    if hw_df is None or hw_df.empty:
+        recs.append("No hardware data provided.")
+    else:
+        recs.append("Review hardware tiers for under-resourced assets.")
+    if sw_df is None or sw_df.empty:
+        recs.append("No software data provided.")
+    else:
+        recs.append("Ensure all applications are classified by criticality.")
+    return " ".join(recs)
+
+
+def build_key_findings(hw_df, sw_df):
+    findings = []
+    if hw_df is not None and "Tier Total Score" in hw_df.columns:
+        max_score = hw_df["Tier Total Score"].max()
+        findings.append(f"Maximum hardware tier score: {max_score}.")
+    if sw_df is not None and "Tier Total Score" in sw_df.columns:
+        avg_score = sw_df["Tier Total Score"].mean()
+        findings.append(f"Average software tier score: {avg_score:.1f}.")
+    return " ".join(findings)
+
+
+def build_section_2_overview(hw_df, sw_df):
+    return (
+        f"The organization’s IT landscape includes {len(hw_df)} hardware assets "
+        f"and {len(sw_df)} software assets across multiple environments."
+    )
+
+
+def build_section_3_hardware_breakdown(hw_df, sw_df):
+    if "Device Type" in hw_df.columns:
+        counts = hw_df["Device Type"].value_counts().to_dict()
+        return f"Hardware inventory breakdown by type: {counts}."
+    return f"Hardware asset count: {len(hw_df)}."
+
+
+def build_section_4_software_breakdown(hw_df, sw_df):
+    if "Application" in sw_df.columns:
+        counts = sw_df["Application"].value_counts().to_dict()
+        return f"Software inventory breakdown by application: {counts}."
+    return f"Software asset count: {len(sw_df)}."
+
+
+def build_section_5_tier_distribution(hw_df, sw_df):
+    if "Tier" in hw_df.columns:
+        dist = hw_df["Tier"].value_counts().to_dict()
+        return f"Tier distribution for hardware: {dist}."
+    return "Tier distribution data unavailable."
+
+
+def build_section_6_hardware_lifecycle(hw_df, sw_df):
+    if "Lifecycle Status" in hw_df.columns:
+        stats = hw_df["Lifecycle Status"].value_counts().to_dict()
+        return f"Hardware lifecycle statuses: {stats}."
+    return "Lifecycle status data unavailable."
+
+
+def build_section_7_software_licensing(hw_df, sw_df):
+    if "License Status" in sw_df.columns:
+        lic = sw_df["License Status"].value_counts().to_dict()
+        return f"Software licensing status: {lic}."
+    return "Licensing data unavailable."
+
+
+def build_section_8_security_posture(hw_df, sw_df):
+    return "Security posture analysis pending integration."
+
+
+def build_section_9_performance_metrics(hw_df, sw_df):
+    return "Performance metrics analysis pending integration."
+
+
+def build_section_10_reliability(hw_df, sw_df):
+    return "Reliability metrics analysis pending integration."
+
+
+def build_section_11_scalability(hw_df, sw_df):
+    return "Scalability assessment pending integration."
+
+
+def build_section_12_legacy_debt(hw_df, sw_df):
+    return "Legacy systems and technical debt analysis pending integration."
+
+
+def build_section_13_obsolete_platforms(hw_df, sw_df):
+    return "Obsolete platform identification pending integration."
+
+
+def build_section_14_cloud_migration(hw_df, sw_df):
+    return "Cloud migration potential analysis pending integration."
+
+
+def build_section_15_strategic_alignment(hw_df, sw_df):
+    return "Strategic alignment analysis pending integration."
+
+
+def build_section_17_financial_implications(hw_df, sw_df):
+    return "Financial implications analysis pending integration."
+
+
+def build_section_18_sustainability(hw_df, sw_df):
+    return "Environmental impact and sustainability analysis pending integration."
+
 
 def build_section_20_next_steps(hw_df, sw_df):
-    return build_recommendations(hw_df, sw_df)
+    return "Recommended next steps and roadmap pending integration."
 
-# ────────────────────────────────────────────────────────────────────────────────
-# Core Assessment Generator
-# ────────────────────────────────────────────────────────────────────────────────
-def generate_assessment(session_id: str,
-                        email: str,
-                        goal: str,
-                        files: list,
-                        next_action_webhook: str,
-                        folder_id: str) -> dict:
-    print(f"[DEBUG] → Starting assessment for session '{session_id}'", flush=True)
-    try:
-        workspace = os.path.join(os.getcwd(), session_id)
-        os.makedirs(workspace, exist_ok=True)
-        print(f"[DEBUG] Workspace created at {workspace}", flush=True)
 
-        # Downloading files
-        hw_df, sw_df = pd.DataFrame(), pd.DataFrame()
-        for f in files:
-            name = f.get("file_name", "unknown")
-            url  = f.get("file_url", "")
-            local = os.path.join(workspace, name)
-            resp = requests.get(url); resp.raise_for_status()
-            with open(local, "wb") as fp:
-                fp.write(resp.content)
+def _to_direct_drive_url(url: str) -> str:
+    m = re.search(r"/d/([A-Za-z0-9_-]+)", url)
+    if m:
+        return f"https://drive.google.com/uc?export=download&id={m.group(1)}"
+    return url
 
-            ext = os.path.splitext(name)[1].lower()
-            if ext in (".xls", ".xlsx"):
-                temp_df = pd.read_excel(local)
-            elif ext == ".csv":
-                temp_df = pd.read_csv(local)
+
+def generate_assessment(
+    session_id,
+    email,
+    goal,
+    files,
+    next_action_webhook="",
+    folder_id=None
+):
+    print("[DEBUG] Entered generate_assessment()", flush=True)
+    session_path = os.path.join(OUTPUT_DIR, session_id)
+    os.makedirs(session_path, exist_ok=True)
+
+    hw_df, sw_df = pd.DataFrame(), pd.DataFrame()
+    hw_file_path = sw_file_path = None
+    for file in files:
+        url, name = file.get("file_url"), file.get("file_name")
+        local = os.path.join(session_path, name)
+        print(f"[DEBUG] Downloading file {name} from {url}", flush=True)
+        if url.startswith("http"):
+            resp = requests.get(_to_direct_drive_url(url))
+            resp.raise_for_status()
+            with open(local, "wb") as f:
+                f.write(resp.content)
+        else:
+            with open(url, "rb") as src, open(local, "wb") as dst:
+                dst.write(src.read())
+        print(f"[DEBUG] Saved to {local}", flush=True)
+        # First asset_inventory -> hardware, second -> software
+        if file.get("type") == "asset_inventory":
+            if hw_file_path is None:
+                hw_file_path = local
             else:
-                print(f"[DEBUG] Skipping non-spreadsheet file {name}", flush=True)
-                continue
+                sw_file_path = local
+        # Also accept explicit gap_working for software
+        elif file.get("type") == "gap_working" and sw_file_path is None:
+            sw_file_path = local
 
-            temp_df.columns = [c.strip() for c in temp_df.columns]
-            inv_type = detect_inventory_type(temp_df, name)
-            print(f"[DEBUG] File '{name}' → {inv_type}", flush=True)
-            if inv_type == "hw": hw_df = pd.concat([hw_df, temp_df], ignore_index=True)
-            elif inv_type == "sw": sw_df = pd.concat([sw_df, temp_df], ignore_index=True)
-            else: print(f"[WARN] Unknown inventory, skipping {name}", flush=True)
+    # Merge & classify
+    def merge_with_template(df_template, df_inv):
+        for c in df_inv.columns:
+            if c not in df_template.columns:
+                df_template[c] = None
+        df_inv = df_inv.reindex(columns=df_template.columns, fill_value=None)
+        return pd.concat([df_template, df_inv], ignore_index=True)
 
-        print(f"[DEBUG] After ingestion: hw_df={hw_df.shape}, sw_df={sw_df.shape}", flush=True)
+    def apply_classification(df):
+        if not df.empty and "Tier Total Score" in df.columns:
+            return df.merge(CLASSIFICATION_DF, how="left", left_on="Tier Total Score", right_on="Score")
+        return df
 
-        # Merge, enrich, classify
-        hw_df = merge_with_template(HW_TEMPLATE_DF.copy(), hw_df)
-        sw_df = merge_with_template(SW_TEMPLATE_DF.copy(), sw_df)
+    if hw_file_path:
+        hw_df = merge_with_template(HW_BASE_DF.copy(), pd.read_excel(hw_file_path))
         hw_df = suggest_hw_replacements(hw_df)
-        sw_df = suggest_sw_replacements(sw_df)
         hw_df = apply_classification(hw_df)
+    if sw_file_path:
+        sw_df = merge_with_template(SW_BASE_DF.copy(), pd.read_excel(sw_file_path))
+        sw_df = suggest_sw_replacements(sw_df)
         sw_df = apply_classification(sw_df)
 
-        # Generate charts
-        print("[DEBUG] Generating charts...", flush=True)
-        charts = generate_visual_charts(hw_df, sw_df, workspace)
-        for key, path in list(charts.items()):
-            charts[key] = upload_to_drive(path, os.path.basename(path), folder_id)
+    # Charts
+    chart_paths = generate_visual_charts(hw_df, sw_df, session_id)
+    for name, local_path in chart_paths.items():
+        try:
+            url = upload_to_drive(local_path, os.path.basename(local_path), session_id)
+            chart_paths[name] = url
+        except Exception as ex:
+            print(f"❌ Failed upload chart {name}: {ex}", flush=True)
 
-        # Additional SW tier/status plots
-        sw_tier_path = os.path.join(workspace, "sw_tier_chart.png")
-        if "Tier Total Score" in sw_df.columns:
-            sw_df["Tier Total Score"].hist(bins=10)
-            plt.title("SW Tier Distribution")
-            plt.savefig(sw_tier_path); plt.clf()
-            try:
-                charts["sw_tier_chart"] = upload_to_drive(sw_tier_path, os.path.basename(sw_tier_path), folder_id)
-            except Exception:
-                print("[DEBUG] Failed to upload SW tier chart", flush=True)
-        else:
-            print("[DEBUG] Skipping SW status chart – no 'License Status' column", flush=True)
+    # Save & upload GAP sheets
+    links = {}
+    for idx, df in enumerate((hw_df, sw_df), start=1):
+        if not df.empty:
+            file_label = ['HW', 'SW'][idx - 1]
+            path = os.path.join(session_path, f"{file_label}GapAnalysis_{session_id}.xlsx")
+            df.to_excel(path, index=False)
+            links[f"file_{idx}_drive_url"] = upload_to_drive(path, os.path.basename(path), session_id)
 
-        # Build narratives
-        section_fns = [
-            build_score_summary, build_section_2_overview, build_section_3_inventory_hardware,
-            build_section_4_inventory_software, build_section_5_classification_distribution,
-            build_section_6_lifecycle_status, build_section_7_software_compliance,
-            build_section_8_security_posture, build_section_9_performance,
-            build_section_10_reliability, build_section_11_scalability,
-            build_section_12_legacy_technical_debt, build_section_13_obsolete_risk,
-            build_section_14_cloud_migration, build_section_15_strategic_alignment,
-            build_section_16_business_impact, build_section_17_financial_implications,
-            build_section_18_environmental_sustainability, build_recommendations,
-            build_section_20_next_steps
-        ]
-        narratives = {}
-        for idx, fn in enumerate(section_fns, start=1):
-            narratives[f"content_{idx}"] = ai_narrative(fn.__name__, fn(hw_df, sw_df))
+    # Build narratives
+    score_summary = build_score_summary(hw_df, sw_df)
+    recommendations = build_recommendations(hw_df, sw_df)
+    key_findings = build_key_findings(hw_df, sw_df)
 
-        # Write out Excels
-        hw_path = os.path.join(workspace, "HWGapAnalysis.xlsx")
-        sw_path = os.path.join(workspace, "SWGapAnalysis.xlsx")
-        write_df_to_template(hw_df, HW_TEMPLATE_PATH, hw_path)
-        write_df_to_template(sw_df, SW_TEMPLATE_PATH, sw_path)
-        hw_url = upload_to_drive(hw_path, os.path.basename(hw_path), folder_id)
-        sw_url = upload_to_drive(sw_path, os.path.basename(sw_path), folder_id)
-        print(f"[DEBUG] Excels uploaded: HW→{hw_url}, SW→{sw_url}", flush=True)
+    # Section content
+    section_2_overview = build_section_2_overview(hw_df, sw_df)
+    section_3_hardware_breakdown = build_section_3_hardware_breakdown(hw_df, sw_df)
+    section_4_software_breakdown = build_section_4_software_breakdown(hw_df, sw_df)
+    section_5_tier_distribution = build_section_5_tier_distribution(hw_df, sw_df)
+    section_6_hardware_lifecycle = build_section_6_hardware_lifecycle(hw_df, sw_df)
+    section_7_software_licensing = build_section_7_software_licensing(hw_df, sw_df)
+    section_8_security_posture = build_section_8_security_posture(hw_df, sw_df)
+    section_9_performance_metrics = build_section_9_performance_metrics(hw_df, sw_df)
+    section_10_reliability = build_section_10_reliability(hw_df, sw_df)
+    section_11_scalability = build_section_11_scalability(hw_df, sw_df)
+    section_12_legacy_debt = build_section_12_legacy_debt(hw_df, sw_df)
+    section_13_obsolete_platforms = build_section_13_obsolete_platforms(hw_df, sw_df)
+    section_14_cloud_migration = build_section_14_cloud_migration(hw_df, sw_df)
+    section_15_strategic_alignment = build_section_15_strategic_alignment(hw_df, sw_df)
+    section_17_financial_implications = build_section_17_financial_implications(hw_df, sw_df)
+    section_18_sustainability = build_section_18_sustainability(hw_df, sw_df)
+    section_20_next_steps = build_section_20_next_steps(hw_df, sw_df)
 
-        # Call Docx generator
-        payload = {
-            "session_id": session_id,
-            "email": email,
-            "goal": goal,
-            **charts,
-            **narratives
-        }
-        endpoint = f"{DOCX_SERVICE_URL.rstrip('/')}/generate_assessment"
-        print(f"[DEBUG] Posting to Docx service @ {endpoint}", flush=True)
-        resp = requests.post(endpoint, json=payload, timeout=300)
-        resp.raise_for_status()
-        docx_resp = resp.json()
+    # Appendices
+    try:
+        classification_matrix_md = CLASSIFICATION_DF.to_markdown(index=False)
+    except Exception:
+        classification_matrix_md = CLASSIFICATION_DF.to_csv(index=False)
+    data_sources_text = "Data sources: asset inventory files, GAP templates, classification tiers."
 
-        # Notify downstream
-        results = {
-            "session_id": session_id,
-            "gpt_module": "it_assessment",
-            "status": "complete",
-            "files": [
-                {"file_name": os.path.basename(hw_path), "drive_url": hw_url},
-                {"file_name": os.path.basename(sw_path), "drive_url": sw_url}
-            ],
-            **charts,
-            **{"docx_url": docx_resp.get("docx_url"), "pptx_url": docx_resp.get("pptx_url")}
-        }
-        notify_url = next_action_webhook or MARKET_GAP_WEBHOOK
-        print(f"[DEBUG] Notifying next at {notify_url}", flush=True)
-        nt = requests.post(notify_url, json=results, timeout=60)
-        nt.raise_for_status()
+    # Build full payload
+    payload = {
+        "session_id": session_id,
+        "email": email,
+        "goal": goal,
+        "hw_gap_url": links.get("file_1_drive_url"),
+        "sw_gap_url": links.get("file_2_drive_url"),
+        "chart_paths": chart_paths,
+        "content_1": score_summary,
+        "content_2": section_2_overview,
+        "content_3": section_3_hardware_breakdown,
+        "content_4": section_4_software_breakdown,
+        "content_5": section_5_tier_distribution,
+        "content_6": section_6_hardware_lifecycle,
+        "content_7": section_7_software_licensing,
+        "content_8": section_8_security_posture,
+        "content_9": section_9_performance_metrics,
+        "content_10": section_10_reliability,
+        "content_11": section_11_scalability,
+        "content_12": section_12_legacy_debt,
+        "content_13": section_13_obsolete_platforms,
+        "content_14": section_14_cloud_migration,
+        "content_15": section_15_strategic_alignment,
+        "content_16": key_findings,
+        "content_17": section_17_financial_implications,
+        "content_18": section_18_sustainability,
+        "content_19": recommendations,
+        "content_20": section_20_next_steps,
+        "appendix_classification_matrix": classification_matrix_md,
+        "appendix_data_sources": data_sources_text,
+        "slide_executive_summary": score_summary,
+        "slide_it_landscape_overview": section_2_overview,
+        "slide_hardware_analysis": section_3_hardware_breakdown,
+        "slide_software_analysis": section_4_software_breakdown,
+        "slide_tier_classification_summary": section_5_tier_distribution,
+        "slide_hardware_lifecycle_chart": section_6_hardware_lifecycle,
+        "slide_software_licensing_review": section_7_software_licensing,
+        "slide_security_vulnerability_heatmap": section_8_security_posture,
+        "slide_performance_&_uptime_trends": section_9_performance_metrics,
+        "slide_system_reliability_overview": section_10_reliability,
+        "slide_scalability_insights": section_11_scalability,
+        "slide_legacy_system_exposure": section_12_legacy_debt,
+        "slide_obsolete_platform_matrix": section_13_obsolete_platforms,
+        "slide_cloud_migration_targets": section_14_cloud_migration,
+        "slide_strategic_it_alignment": section_15_strategic_alignment,
+        "slide_business_impact_of_gaps": key_findings,
+        "slide_cost_of_obsolescence": section_17_financial_implications,
+        "slide_sustainability_&_green_it": section_18_sustainability,
+        "slide_remediation_recommendations": recommendations,
+        "slide_roadmap_&_next_steps": section_20_next_steps,
+    }
 
-        return results
+    print(f"[DEBUG] Calling Report-Generator at {DOCX_SERVICE_URL}/generate_assessment", flush=True)
+    resp = requests.post(f"{DOCX_SERVICE_URL}/generate_assessment", json=payload)
+    resp.raise_for_status()
+    gen = resp.json()
+    print(f"[DEBUG] Report-Generator response: {gen}", flush=True)
 
+    # Download & upload DOCX/PPTX back to Drive
+    docx_rel, pptx_rel = gen.get("docx_url"), gen.get("pptx_url")
+    docx_url = f"{DOCX_SERVICE_URL.rstrip('/')}{docx_rel}"
+    pptx_url = f"{DOCX_SERVICE_URL.rstrip('/')}{pptx_rel}"
+    docx_name, pptx_name = os.path.basename(docx_rel), os.path.basename(pptx_rel)
+    docx_local = os.path.join(session_path, docx_name)
+    pptx_local = os.path.join(session_path, pptx_name)
+    for dl_url, local in [(docx_url, docx_local), (pptx_url, pptx_local)]:
+        resp_dl = requests.get(dl_url)
+        resp_dl.raise_for_status()
+        with open(local, "wb") as f:
+            f.write(resp_dl.content)
+    links["file_3_drive_url"] = upload_to_drive(docx_local, docx_name, session_id)
+    links["file_4_drive_url"] = upload_to_drive(pptx_local, pptx_name, session_id)
+
+    result = {
+        "session_id": session_id,
+        "gpt_module": "it_assessment",
+        "status": "complete",
+        **links
+    }
+
+    try:
+        r = requests.post(MARKET_GAP_WEBHOOK, json=result)
+        print(f"[DEBUG] Market-GAP notify status: {r.status_code}", flush=True)
     except Exception as e:
-        print("[ERROR] generate_assessment exception:", str(e), flush=True)
-        traceback.print_exc()
-        raise
+        print(f"❌ Market-GAP notify failed: {e}", flush=True)
 
-# Alias for compatibility with app.py import
-process_assessment = generate_assessment
+    return result
 
-# Entry point for container
-if __name__ == "__main__":
-    payload = json.loads(sys.stdin.read())
-    print("📥 Received trigger to start assessment", payload, flush=True)
-    result = generate_assessment(
-        session_id=payload.get("session_id", ""),
-        email=payload.get("email", ""),
-        goal=payload.get("goal", ""),
-        files=payload.get("files", []),
-        next_action_webhook=payload.get("next_action_webhook", ""),
-        folder_id=payload.get("folder_id", "")
+
+def process_assessment(data):
+    session_id = data.get("session_id")
+    email = data.get("email")
+    goal = data.get("goal", "project plan")
+    files = data.get("files", [])
+    next_action_webhook = data.get("next_action_webhook", "")
+    folder_id = data.get("folder_id")
+
+    print("[DEBUG] Entered process_assessment()", flush=True)
+    return generate_assessment(
+        session_id, email, goal, files, next_action_webhook, folder_id
     )
-    print("✅ Assessment completed. Returning result.", result, flush=True)
