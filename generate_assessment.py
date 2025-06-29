@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import traceback
 import pandas as pd
@@ -31,9 +32,13 @@ print("[DEBUG] Loading Excel templates...", flush=True)
 HW_TEMPLATE_DF    = pd.read_excel(HW_TEMPLATE_PATH)
 SW_TEMPLATE_DF    = pd.read_excel(SW_TEMPLATE_PATH)
 CLASSIFICATION_DF = pd.read_excel(CLASSIFICATION_PATH)
-print("[DEBUG] Templates loaded:", 
-      f"HW={HW_TEMPLATE_DF.shape}", f"SW={SW_TEMPLATE_DF.shape}", f"CL={CLASSIFICATION_DF.shape}", flush=True)
-
+print(
+    "[DEBUG] Templates loaded:",
+    f"HW={HW_TEMPLATE_DF.shape}",
+    f"SW={SW_TEMPLATE_DF.shape}",
+    f"CL={CLASSIFICATION_DF.shape}",
+    flush=True
+)
 
 # ────────────────────────────────────────────────────────────────────────────────
 # Utility Functions
@@ -49,8 +54,12 @@ def merge_with_template(template_df: pd.DataFrame, inv_df: pd.DataFrame) -> pd.D
 
 def apply_classification(df: pd.DataFrame) -> pd.DataFrame:
     if "Tier Total Score" in df.columns:
-        merged = df.merge(CLASSIFICATION_DF, how="left",
-                          left_on="Tier Total Score", right_on="Score")
+        merged = df.merge(
+            CLASSIFICATION_DF,
+            how="left",
+            left_on="Tier Total Score",
+            right_on="Score"
+        )
         print(f"[DEBUG] apply_classification: result shape {merged.shape}", flush=True)
         return merged
     return df
@@ -83,12 +92,12 @@ def ai_narrative(section_name: str, data_summary: dict) -> str:
     print(f"[DEBUG] ai_narrative → received {len(text.split())} words", flush=True)
     return text
 
-# Added helper to write DataFrames back into Excel templates
-
-def write_df_to_template(df: pd.DataFrame,
-                         template_path: str,
-                         out_path: str,
-                         sheet_name: str = "Data"):
+def write_df_to_template(
+    df: pd.DataFrame,
+    template_path: str,
+    out_path: str,
+    sheet_name: str = "Data"
+):
     """
     Opens the Excel template, clears all rows beneath row 1 of 'sheet_name',
     writes `df` back in, then saves to `out_path`. Charts on other sheets
@@ -97,14 +106,14 @@ def write_df_to_template(df: pd.DataFrame,
     wb = load_workbook(template_path)
     ws = wb[sheet_name]
 
-    # remove old data rows
+    # remove existing data rows
     if ws.max_row > 1:
         ws.delete_rows(2, ws.max_row - 1)
 
-    # write new data
+    # write DataFrame rows
     for r_idx, row in enumerate(df.itertuples(index=False, name=None), start=2):
-        for c_idx, value in enumerate(row, start=1):
-            ws.cell(row=r_idx, column=c_idx, value=value)
+        for c_idx, val in enumerate(row, start=1):
+            ws.cell(row=r_idx, column=c_idx, value=val)
 
     wb.save(out_path)
 
@@ -176,11 +185,11 @@ def build_section_12_legacy_technical_debt(hw_df, sw_df):
 def build_section_13_obsolete_risk(hw_df, sw_df):
     risks = []
     if not hw_df.empty:
-        low = hw_df[hw_df["Tier Total Score"] < 30]
-        risks.append({"hardware": low.to_dict(orient="records")})
+        low_hw = hw_df[hw_df["Tier Total Score"] < 30]
+        risks.append({"hardware": low_hw.to_dict(orient="records")})
     if not sw_df.empty:
-        low = sw_df[sw_df["Tier Total Score"] < 30]
-        risks.append({"software": low.to_dict(orient="records")})
+        low_sw = sw_df[sw_df["Tier Total Score"] < 30]
+        risks.append({"software": low_sw.to_dict(orient="records")})
     return {"risks": risks}
 
 def build_section_14_cloud_migration(hw_df, sw_df):
@@ -217,14 +226,12 @@ def generate_assessment(session_id: str,
                         folder_id: str) -> dict:
     print(f"[DEBUG] → Starting assessment for session '{session_id}'", flush=True)
     try:
-        # Prepare workspace
         workspace = os.path.join(os.getcwd(), session_id)
         os.makedirs(workspace, exist_ok=True)
         print(f"[DEBUG] Workspace created at {workspace}", flush=True)
 
-        # 1) Download & ingest spreadsheets
-        hw_df = pd.DataFrame()
-        sw_df = pd.DataFrame()
+        # Downloading files
+        hw_df, sw_df = pd.DataFrame(), pd.DataFrame()
         for f in files:
             name = f.get("file_name", "unknown")
             url  = f.get("file_url", "")
@@ -245,16 +252,13 @@ def generate_assessment(session_id: str,
             temp_df.columns = [c.strip() for c in temp_df.columns]
             inv_type = detect_inventory_type(temp_df, name)
             print(f"[DEBUG] File '{name}' → {inv_type}", flush=True)
-            if inv_type == "hw":
-                hw_df = pd.concat([hw_df, temp_df], ignore_index=True)
-            elif inv_type == "sw":
-                sw_df = pd.concat([sw_df, temp_df], ignore_index=True)
-            else:
-                print(f"[WARN] Unknown inventory, skipping {name}", flush=True)
+            if inv_type == "hw": hw_df = pd.concat([hw_df, temp_df], ignore_index=True)
+            elif inv_type == "sw": sw_df = pd.concat([sw_df, temp_df], ignore_index=True)
+            else: print(f"[WARN] Unknown inventory, skipping {name}", flush=True)
 
         print(f"[DEBUG] After ingestion: hw_df={hw_df.shape}, sw_df={sw_df.shape}", flush=True)
 
-        # 2) Merge into templates, enrich, classify
+        # Merge, enrich, classify
         hw_df = merge_with_template(HW_TEMPLATE_DF.copy(), hw_df)
         sw_df = merge_with_template(SW_TEMPLATE_DF.copy(), sw_df)
         hw_df = suggest_hw_replacements(hw_df)
@@ -262,29 +266,26 @@ def generate_assessment(session_id: str,
         hw_df = apply_classification(hw_df)
         sw_df = apply_classification(sw_df)
 
-        # 3) Generate & upload charts
+        # Generate charts
         print("[DEBUG] Generating charts...", flush=True)
         charts = generate_visual_charts(hw_df, sw_df, workspace)
         for key, path in list(charts.items()):
-            url = upload_to_drive(path, os.path.basename(path), folder_id)
-            charts[key] = url
+            charts[key] = upload_to_drive(path, os.path.basename(path), folder_id)
 
-        sw_tier_path   = os.path.join(workspace, "sw_tier_chart.png")
-        sw_status_path = os.path.join(workspace, "sw_status_chart.png")
+        # Additional SW tier/status plots
+        sw_tier_path = os.path.join(workspace, "sw_tier_chart.png")
         if "Tier Total Score" in sw_df.columns:
             sw_df["Tier Total Score"].hist(bins=10)
             plt.title("SW Tier Distribution")
             plt.savefig(sw_tier_path); plt.clf()
             try:
-                charts["sw_tier_chart"] = upload_to_drive(
-                    sw_tier_path, os.path.basename(sw_tier_path), folder_id
-                )
+                charts["sw_tier_chart"] = upload_to_drive(sw_tier_path, os.path.basename(sw_tier_path), folder_id)
             except Exception:
                 print("[DEBUG] Failed to upload SW tier chart", flush=True)
         else:
             print("[DEBUG] Skipping SW status chart – no 'License Status' column", flush=True)
 
-        # 4) Build AI narratives
+        # Build narratives
         section_fns = [
             build_score_summary, build_section_2_overview, build_section_3_inventory_hardware,
             build_section_4_inventory_software, build_section_5_classification_distribution,
@@ -301,18 +302,16 @@ def generate_assessment(session_id: str,
         for idx, fn in enumerate(section_fns, start=1):
             narratives[f"content_{idx}"] = ai_narrative(fn.__name__, fn(hw_df, sw_df))
 
-        # 5) Write & upload Excels
+        # Write out Excels
         hw_path = os.path.join(workspace, "HWGapAnalysis.xlsx")
         sw_path = os.path.join(workspace, "SWGapAnalysis.xlsx")
-        hw_df.to_excel(hw_path, index=False)
-        # 5) Write out the templated Excel files (preserving charts & formulas)
         write_df_to_template(hw_df, HW_TEMPLATE_PATH, hw_path)
         write_df_to_template(sw_df, SW_TEMPLATE_PATH, sw_path)
         hw_url = upload_to_drive(hw_path, os.path.basename(hw_path), folder_id)
         sw_url = upload_to_drive(sw_path, os.path.basename(sw_path), folder_id)
         print(f"[DEBUG] Excels uploaded: HW→{hw_url}, SW→{sw_url}", flush=True)
 
-        # 6) Call Docx generator
+        # Call Docx generator
         payload = {
             "session_id": session_id,
             "email": email,
@@ -326,7 +325,7 @@ def generate_assessment(session_id: str,
         resp.raise_for_status()
         docx_resp = resp.json()
 
-        # 7) Notify downstream using original structure
+        # Notify downstream
         results = {
             "session_id": session_id,
             "gpt_module": "it_assessment",
@@ -348,7 +347,10 @@ def generate_assessment(session_id: str,
     except Exception as e:
         print("[ERROR] generate_assessment exception:", str(e), flush=True)
         traceback.print_exc()
-        # propagate to caller
+        raise
+
+# Alias for compatibility with app.py import
+process_assessment = generate_assessment
 
 # Entry point for container
 if __name__ == "__main__":
