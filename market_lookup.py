@@ -1,5 +1,19 @@
 import random
 import pandas as pd
+import re
+
+def pick_name(row, patterns, default):
+    """
+    Look through row.index for any column matching one of the regex patterns.
+    Return the first non-null value found, otherwise default.
+    """
+    for pat in patterns:
+        for col in row.index:
+            if re.search(pat, col, re.IGNORECASE):
+                val = row.get(col)
+                if pd.notna(val):
+                    return val
+    return default
 
 def fetch_market_device_data(device_name):
     """
@@ -21,12 +35,10 @@ def fetch_market_device_data(device_name):
 def suggest_hw_replacements(hw_df):
     updated_df = hw_df.copy()
     for idx, row in updated_df.iterrows():
-        # look for any of the column names your sheets actually use
-        device_name = (
-            row.get('Device Name')
-            or row.get('Server Name')
-            or row.get('Model')
-            or f"Device-{idx}"
+        device_name = pick_name(
+            row,
+            patterns=[r"device", r"server", r"asset"],
+            default=f"Device-{idx}"
         )
         market_data = fetch_market_device_data(device_name)
         for key, value in market_data.items():
@@ -36,16 +48,14 @@ def suggest_hw_replacements(hw_df):
 def suggest_sw_replacements(sw_df):
     updated_df = sw_df.copy()
     for idx, row in updated_df.iterrows():
-        software_name = (
-            row.get('Software Name')
-            or row.get('Application')
-            or row.get('App Name')
-            or f"App-{idx}"
+        software_name = pick_name(
+            row,
+            patterns=[r"app", r"application", r"software"],
+            default=f"App-{idx}"
         )
         market_data = fetch_market_device_data(software_name)
         for key, value in market_data.items():
             updated_df.at[idx, key] = value
     return updated_df
-
 # === Compatibility alias for expected import in generate_assessment.py ===
 fetch_latest_device_replacement = fetch_market_device_data
