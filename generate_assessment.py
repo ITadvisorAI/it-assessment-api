@@ -215,10 +215,14 @@ def generate_assessment(
         sw_df = apply_classification(sw_df)
 
     # Charts
-   print(f"[DEBUG] Generating visual charts", flush=True)
-        uploaded_charts = generate_visual_charts(hw_df, sw_df, session_path)
-        print(f"[DEBUG] Charts generated: {uploaded_charts}", flush=True)
-    except Exception as ex:
+           print(f"[DEBUG] Generating visual charts", flush=True)
+    charts = generate_visual_charts(hw_df, sw_df, session_path)
+          print(f"[DEBUG] Charts generated: {uploaded_charts}", flush=True)
+    # Use distinct variable name for clarity
+    for name, chart_local in charts.items():
+        try:
+            charts[name] = upload_to_drive(chart_local, os.path.basename(chart_local), folder_id)
+        except Exception as ex:
             print(f"❌ Failed upload chart {name}: {ex}", flush=True)
 
     # Write gap-analysis Excels
