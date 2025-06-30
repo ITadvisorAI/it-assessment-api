@@ -161,7 +161,7 @@ def generate_assessment(
     goal,
     files,
     next_action_webhook="",
-    folder_id=None
+    folder_id= "folder_id"
 ):
     print("[DEBUG] Entered generate_assessment()", flush=True)
     session_path = os.path.join(OUTPUT_DIR, session_id)
@@ -218,8 +218,11 @@ def generate_assessment(
     chart_paths = generate_visual_charts(hw_df, sw_df, session_id)
     for name, local_path in chart_paths.items():
         try:
-            url = charts[name] = upload_to_drive(path, os.path.basename(path), folder_id)
-            chart_paths[name] = url
+            chart_paths[name] = upload_to_drive(
+            chart_local,
+            os.path.basename(chart_local),
+            folder_id
+        )
         except Exception as ex:
             print(f"❌ Failed upload chart {name}: {ex}", flush=True)
 
@@ -334,8 +337,7 @@ def generate_assessment(
         with open(local, "wb") as f:
             f.write(resp_dl.content)
     links["file_3_drive_url"] = upload_to_drive(local_doc, os.path.basename(local_doc), folder_id)
-    links["file_4_drive_url"] = upload_to_drive(local_doc, os.path.basename(local_doc), folder_id)
-
+    links["file_4_drive_url"] = upload_to_drive(local_ppt, os.path.basename(local_ppt), folder_id)
     result = {
         "session_id": session_id,
         "gpt_module": "it_assessment",
