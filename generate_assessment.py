@@ -240,9 +240,19 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
                 )
                 print(f"[DEBUG] Merged sw_df with CLASSIFICATION_DF, new cols: {sw_df.columns.tolist()}", flush=True)
         # Generate visual charts
-        print(f"[DEBUG] Generating visual charts", flush=True)
-        uploaded_charts = generate_visual_charts(hw_df, sw_df, session_path)
-        print(f"[DEBUG] Uploaded charts: {uploaded_charts}", flush=True)
+            print(f"[DEBUG] Pre-chart hw_df shape: {hw_df.shape}", flush=True)
+            print(f"[DEBUG] Pre-chart sw_df shape: {sw_df.shape}", flush=True)
+            if "Tier Total Score" in hw_df.columns:
+                print(f"[DEBUG] hw_df Tier scores: {hw_df['Tier Total Score'].unique()}", flush=True)
+            if "Tier Total Score" in sw_df.columns:
+                print(f"[DEBUG] sw_df Tier scores: {sw_df['Tier Total Score'].unique()}", flush=True)
+            if "Category" in hw_df.columns:
+                print(f"[DEBUG] hw_df Categories: {hw_df['Category'].value_counts().to_dict()}", flush=True)
+            if "Category" in sw_df.columns:
+                print(f"[DEBUG] sw_df Categories: {sw_df['Category'].value_counts().to_dict()}", flush=True)
+            print(f"[DEBUG] Generating visual charts", flush=True)
+            uploaded_charts = generate_visual_charts(hw_df, sw_df, session_path)
+            print(f"[DEBUG] Uploaded charts: {uploaded_charts}", flush=True)
 
         # 5) Build narratives
         section_funcs = [
