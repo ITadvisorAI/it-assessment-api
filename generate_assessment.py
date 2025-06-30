@@ -214,33 +214,36 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
             print(f"[DEBUG] Read {name} into DataFrame with shape {df_temp.shape}", flush=True)
             lower = {c.lower() for c in df_temp.columns}
             file_type = f.get('type', '').lower()
+            name_lower = name.lower()
 
+            # — Override based on filename keywords —
+            if any(k in name_lower for k in ("server", "device", "asset")):
+                file_type = "hardware"
+            elif any(k in name_lower for k in ("application", "app", "software")):
+                file_type = "software"
+
+            # — Classify into hardware or software —
             if (
                 file_type in ("hardware", "asset_inventory") and (
-                    {"device id", "device name"} <= lower
-                    or {"server id", "server name"} <= lower
+                    {"device id", "device name"}.issubset(lower)
+                    or {"server id", "server name"}.issubset(lower)
                 )
             ) or file_type == "hardware":
                 hw_df = pd.concat([hw_df, df_temp], ignore_index=True)
-                print(
-                    f"[DEBUG] Appended to hw_df via detector, new shape {hw_df.shape}",
-                    flush=True,
-                )
+                print(f"[DEBUG] Appended to hw_df (hardware), new shape {hw_df.shape}", flush=True)
             elif (
-                file_type in ("software", "asset_inventory")
-                and {"app id", "app name"} <= lower
+                file_type in ("software", "asset_inventory") and (
+                    {"app id", "app name"}.issubset(lower)
+                    or {"application id", "application name"}.issubset(lower)
+                )
             ) or file_type == "software":
                 sw_df = pd.concat([sw_df, df_temp], ignore_index=True)
-                print(
-                    f"[DEBUG] Appended to sw_df (software), new shape {sw_df.shape}",
-                    flush=True,
-                )
+                print(f"[DEBUG] Appended to sw_df (software), new shape {sw_df.shape}", flush=True)
             else:
+                # Final fallback to software
                 sw_df = pd.concat([sw_df, df_temp], ignore_index=True)
-                print(
-                    f"[DEBUG] Appended to sw_df via fallback, new shape {sw_df.shape}",
-                    flush=True,
-                )
+                print(f"[DEBUG] Fallback appended to sw_df, new shape {sw_df.shape}", flush=True)
+                
         # Enrich & classify
         if not hw_df.empty:
             print(f"[DEBUG] Running hardware replacements on hw_df", flush=True)
