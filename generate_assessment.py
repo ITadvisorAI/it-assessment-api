@@ -215,25 +215,21 @@ def generate_assessment(
         sw_df = apply_classification(sw_df)
 
     # Charts
-    chart_paths = generate_visual_charts(hw_df, sw_df, session_id)
-    for name, local_path in chart_paths.items():
-        try:
-            chart_paths[name] = upload_to_drive(
-            chart_local,
-            os.path.basename(chart_local),
-            folder_id
-        )
-        except Exception as ex:
+   print(f"[DEBUG] Generating visual charts", flush=True)
+        uploaded_charts = generate_visual_charts(hw_df, sw_df, session_path)
+        print(f"[DEBUG] Charts generated: {uploaded_charts}", flush=True)
+    except Exception as ex:
             print(f"❌ Failed upload chart {name}: {ex}", flush=True)
 
-    # Save & upload GAP sheets
-    links = {}
-    for idx, df in enumerate((hw_df, sw_df), start=1):
-        if not df.empty:
-            file_label = ['HW', 'SW'][idx - 1]
-            path = upload_to_drive(p, os.path.basename(p), folder_id)
-            df.to_excel(path, index=False)
-            links[f"file_{idx}_drive_url"] = upload_to_drive(path, os.path.basename(path), session_id)
+    # Write gap-analysis Excels
+        hw_xl = os.path.join(session_path, "HWGapAnalysis.xlsx")
+        sw_xl = os.path.join(session_path, "SWGapAnalysis.xlsx")
+        hw_df.to_excel(hw_xl, index=False)
+        sw_df.to_excel(sw_xl, index=False)
+
+        # 7) Upload gap-analysis Excels
+        hw_url = upload_to_drive(hw_xl, os.path.basename(hw_xl), folder_id)
+        sw_url = upload_to_drive(sw_xl, os.path.basename(sw_xl), folder_id)
 
     # Build narratives
     score_summary = build_score_summary(hw_df, sw_df)
@@ -273,7 +269,7 @@ def generate_assessment(
         "goal": goal,
         "hw_gap_url": links.get("file_1_drive_url"),
         "sw_gap_url": links.get("file_2_drive_url"),
-        "chart_paths": chart_paths,
+        "chart_paths": uploaded_charts,
         "content_1": score_summary,
         "content_2": section_2_overview,
         "content_3": section_3_hardware_breakdown,
@@ -329,8 +325,14 @@ def generate_assessment(
     docx_url = f"{DOCX_SERVICE_URL.rstrip('/')}{docx_rel}"
     pptx_url = f"{DOCX_SERVICE_URL.rstrip('/')}{pptx_rel}"
     docx_name, pptx_name = os.path.basename(docx_rel), os.path.basename(pptx_rel)
-    docx_local = upload_to_drive(local_doc, os.path.basename(local_doc), folder_id)
-    pptx_local = upload_to_drive(local_ppt, os.path.basename(local_ppt), folder_id)
+    # Download DOCX
+    dl = requests.get(docx_url); dl.raise_for_status()
+    with open(local_doc, "wb") as f: f.write(dl.content)
+    links["file_3_drive_url"] = upload_to_drive(local_doc, os.path.basename(local_doc), folder_id)
+    # Download PPTX
+    dl = requests.get(pptx_url); dl.raise_for_status()
+    with open(local_ppt, "wb") as f: f.write(dl.content)
+    links["file_4_drive_url"] = upload_to_drive(local_ppt, os.path.basename(local_ppt), folder_id)
     for dl_url, local in [(docx_url, docx_local), (pptx_url, pptx_local)]:
         resp_dl = requests.get(dl_url)
         resp_dl.raise_for_status()
