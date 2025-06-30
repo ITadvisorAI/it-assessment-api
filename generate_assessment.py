@@ -22,16 +22,6 @@ CLASSIFICATION_DF = pd.read_excel(os.path.join(TEMPLATES_DIR, "ClassificationTie
 print("[DEBUG] Templates cached successfully", flush=True)
 # ──────────────────────────────────────────────
 
-# Base dataframes for merging inventory data
-HW_BASE_DF = pd.DataFrame(columns=["Device ID", "Device Name", "Current Model", "Tier Total Score"])
-SW_BASE_DF = pd.DataFrame(columns=["App ID", "App Name", "License Status", "Tier Total Score"])
-CLASSIFICATION_DF = pd.DataFrame([
-    {"Score": 0, "Category": "Critical"},
-    {"Score": 50, "Category": "High"},
-    {"Score": 75, "Category": "Medium"},
-    {"Score": 90, "Category": "Low"}
-])
-
 # Service endpoints
 DOCX_SERVICE_URL = os.getenv("DOCX_SERVICE_URL", "https://docx-generator-api.onrender.com")
 MARKET_GAP_WEBHOOK = os.getenv("MARKET_GAP_WEBHOOK", "https://market-gap-analysis.onrender.com/start_market_gap")
