@@ -218,7 +218,7 @@ def generate_assessment(
     chart_paths = generate_visual_charts(hw_df, sw_df, session_id)
     for name, local_path in chart_paths.items():
         try:
-            url = upload_to_drive(local_path, os.path.basename(local_path), session_id)
+            url = charts[name] = upload_to_drive(path, os.path.basename(path), folder_id)
             chart_paths[name] = url
         except Exception as ex:
             print(f"❌ Failed upload chart {name}: {ex}", flush=True)
@@ -228,7 +228,7 @@ def generate_assessment(
     for idx, df in enumerate((hw_df, sw_df), start=1):
         if not df.empty:
             file_label = ['HW', 'SW'][idx - 1]
-            path = os.path.join(session_path, f"{file_label}GapAnalysis_{session_id}.xlsx")
+            path = upload_to_drive(p, os.path.basename(p), folder_id)
             df.to_excel(path, index=False)
             links[f"file_{idx}_drive_url"] = upload_to_drive(path, os.path.basename(path), session_id)
 
@@ -326,15 +326,15 @@ def generate_assessment(
     docx_url = f"{DOCX_SERVICE_URL.rstrip('/')}{docx_rel}"
     pptx_url = f"{DOCX_SERVICE_URL.rstrip('/')}{pptx_rel}"
     docx_name, pptx_name = os.path.basename(docx_rel), os.path.basename(pptx_rel)
-    docx_local = os.path.join(session_path, docx_name)
-    pptx_local = os.path.join(session_path, pptx_name)
+    docx_local = upload_to_drive(local_doc, os.path.basename(local_doc), folder_id)
+    pptx_local = upload_to_drive(local_ppt, os.path.basename(local_ppt), folder_id)
     for dl_url, local in [(docx_url, docx_local), (pptx_url, pptx_local)]:
         resp_dl = requests.get(dl_url)
         resp_dl.raise_for_status()
         with open(local, "wb") as f:
             f.write(resp_dl.content)
-    links["file_3_drive_url"] = upload_to_drive(docx_local, docx_name, session_id)
-    links["file_4_drive_url"] = upload_to_drive(pptx_local, pptx_name, session_id)
+    links["file_3_drive_url"] = upload_to_drive(local_doc, os.path.basename(local_doc), folder_id)
+    links["file_4_drive_url"] = upload_to_drive(local_doc, os.path.basename(local_doc), folder_id)
 
     result = {
         "session_id": session_id,
