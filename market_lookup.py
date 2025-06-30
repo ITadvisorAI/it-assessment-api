@@ -21,7 +21,13 @@ def fetch_market_device_data(device_name):
 def suggest_hw_replacements(hw_df):
     updated_df = hw_df.copy()
     for idx, row in updated_df.iterrows():
-        device_name = row.get('Device Name') or row.get('Model') or f"Device-{idx}"
+        # look for any of the column names your sheets actually use
+        device_name = (
+            row.get('Device Name')
+            or row.get('Server Name')
+            or row.get('Model')
+            or f"Device-{idx}"
+        )
         market_data = fetch_market_device_data(device_name)
         for key, value in market_data.items():
             updated_df.at[idx, key] = value
@@ -30,7 +36,12 @@ def suggest_hw_replacements(hw_df):
 def suggest_sw_replacements(sw_df):
     updated_df = sw_df.copy()
     for idx, row in updated_df.iterrows():
-        software_name = row.get('Software Name') or row.get('Application') or f"App-{idx}"
+        software_name = (
+            row.get('Software Name')
+            or row.get('Application')
+            or row.get('App Name')
+            or f"App-{idx}"
+        )
         market_data = fetch_market_device_data(software_name)
         for key, value in market_data.items():
             updated_df.at[idx, key] = value
