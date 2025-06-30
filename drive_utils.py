@@ -7,12 +7,16 @@ from google.oauth2 import service_account
 # Path to your service account JSON key
 SERVICE_ACCOUNT_FILE = "/etc/secrets/service_account.json"
 
-# Authenticate and construct the Drive API client
-creds = service_account.Credentials.from_service_account_file(
-    SERVICE_ACCOUNT_FILE,
-    scopes=["https://www.googleapis.com/auth/drive"]
-)
-drive_service = build('drive', 'v3', credentials=creds)
+# Authenticate and construct the Drive API client if credentials exist
+if os.path.exists(SERVICE_ACCOUNT_FILE):
+    creds = service_account.Credentials.from_service_account_file(
+        SERVICE_ACCOUNT_FILE,
+        scopes=["https://www.googleapis.com/auth/drive"]
+    )
+    drive_service = build('drive', 'v3', credentials=creds)
+else:
+    creds = None
+    drive_service = None
 
 def upload_to_drive(file_path: str, file_name: str, folder_identifier: str) -> str:
     """
@@ -23,6 +27,10 @@ def upload_to_drive(file_path: str, file_name: str, folder_identifier: str) -> s
     :param folder_identifier: Drive folder ID or folder name
     :return: webViewLink for the uploaded file
     """
+    if drive_service is None:
+        print("[WARN] Drive service not configured; returning local path", flush=True)
+        return file_path
+
     # Determine if the identifier is a Drive folder ID (alphanumeric, "-" or "_", ~20+ chars)
     if re.fullmatch(r"[A-Za-z0-9_-]{20,}", folder_identifier):
         folder_id = folder_identifier

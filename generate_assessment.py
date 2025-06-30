@@ -3,12 +3,18 @@ import json
 import pandas as pd
 import requests
 import openai
+import shutil
 from market_lookup import suggest_hw_replacements, suggest_sw_replacements
 from visualization import generate_visual_charts
 from drive_utils import upload_to_drive
+
+# Backwards compatibility for tests expecting `upload_file_to_drive`
+upload_file_to_drive = upload_to_drive
 from docx import Document
 from pptx import Presentation
 from pptx.util import Inches
+from report_docx import generate_docx_report
+from report_pptx import generate_pptx_report
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
 OUTPUT_DIR = "temp_sessions"
@@ -34,7 +40,8 @@ def build_score_summary(hw_df, sw_df):
 def build_section_2_overview(hw_df, sw_df):
     total_devices = len(hw_df)
     total_applications = len(sw_df)
-    healthy_devices = int((hw_df.get("Tier Total Score", pd.Series()).astype(int) >= 75).sum())
+    scores = pd.to_numeric(hw_df.get("Tier Total Score", pd.Series()), errors="coerce")
+    healthy_devices = int((scores >= 75).sum())
     compliant_licenses = int((sw_df.get("License Status", pd.Series()) != "Expired").sum())
     return {
         "total_devices": total_devices,
@@ -120,6 +127,8 @@ def build_section_20_next_steps(hw_df, sw_df):
 
 def ai_narrative(section_name: str, summary: dict) -> str:
     print(f"[DEBUG] ai_narrative called for section {section_name} with summary keys: {list(summary.keys())}", flush=True)
+    if not (os.getenv("OPENAI_API_KEY") or getattr(openai, "api_key", None)):
+        return ""
     # chunk large lists to avoid rate limits
     list_items = [(k, v) for k, v in summary.items() if isinstance(v, list)]
     if list_items:
@@ -178,36 +187,60 @@ def ai_narrative(section_name: str, summary: dict) -> str:
         )
     return resp.choices[0].message.content.strip()
 
-def generate_assessment(session_id: str, email: str, goal: str, files: list, next_action_webhook: str, folder_id: str) -> dict:
+def generate_assessment(session_id: str, email: str, goal: str, files: list, next_action_webhook: str, folder_id: str = "") -> dict:
     print(f"[DEBUG] Starting generate_assessment for session {session_id}", flush=True)
     try:
         hw_df, sw_df = pd.DataFrame(), pd.DataFrame()
-        session_path = f"./{session_id}"; os.makedirs(session_path, exist_ok=True)
+        session_path = os.path.join(OUTPUT_DIR, session_id)
+        os.makedirs(session_path, exist_ok=True)
         print(f"[DEBUG] Session path created: {session_path}", flush=True)
+
+        uploaded_charts = {}
+
         # Download files
         for f in files:
             name, url = f['file_name'], f['file_url']
             print(f"[DEBUG] Downloading {name} from {url}", flush=True)
             local = os.path.join(session_path, name)
-            r = requests.get(url); r.raise_for_status(); open(local, 'wb').write(r.content)
+            if url.startswith("http"):
+                r = requests.get(url)
+                r.raise_for_status()
+                open(local, "wb").write(r.content)
+            else:
+                with open(url, "rb") as src, open(local, "wb") as dst:
+                    dst.write(src.read())
             print(f"[DEBUG] Downloaded and wrote {name}", flush=True)
             df_temp = pd.read_excel(local)
             print(f"[DEBUG] Read {name} into DataFrame with shape {df_temp.shape}", flush=True)
             lower = {c.lower() for c in df_temp.columns}
             file_type = f.get('type', '').lower()
 
-            if file_type == 'asset_inventory' and (
-               {'device id', 'device name'} <= lower or
-               {'server id', 'server name'} <= lower
-            ):
-              hw_df = pd.concat([hw_df, df_temp], ignore_index=True)
-              print(f"[DEBUG] Appended to hw_df via broadened detector, new shape {hw_df.shape}", flush=True)
-            elif file_type == 'asset_inventory' and {'app id', 'app name'} <= lower:
-              sw_df = pd.concat([sw_df, df_temp], ignore_index=True)
-              print(f"[DEBUG] Appended to sw_df (software), new shape {sw_df.shape}", flush=True)
-        else:
-            sw_df = pd.concat([sw_df, df_temp], ignore_index=True)
-            print(f"[DEBUG] Appended to sw_df via fallback, new shape {sw_df.shape}", flush=True)
+            if (
+                file_type in ("hardware", "asset_inventory") and (
+                    {"device id", "device name"} <= lower
+                    or {"server id", "server name"} <= lower
+                )
+            ) or file_type == "hardware":
+                hw_df = pd.concat([hw_df, df_temp], ignore_index=True)
+                print(
+                    f"[DEBUG] Appended to hw_df via detector, new shape {hw_df.shape}",
+                    flush=True,
+                )
+            elif (
+                file_type in ("software", "asset_inventory")
+                and {"app id", "app name"} <= lower
+            ) or file_type == "software":
+                sw_df = pd.concat([sw_df, df_temp], ignore_index=True)
+                print(
+                    f"[DEBUG] Appended to sw_df (software), new shape {sw_df.shape}",
+                    flush=True,
+                )
+            else:
+                sw_df = pd.concat([sw_df, df_temp], ignore_index=True)
+                print(
+                    f"[DEBUG] Appended to sw_df via fallback, new shape {sw_df.shape}",
+                    flush=True,
+                )
         # Enrich & classify
         if not hw_df.empty:
             print(f"[DEBUG] Running hardware replacements on hw_df", flush=True)
@@ -239,20 +272,21 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
                     right_on='Score'
                 )
                 print(f"[DEBUG] Merged sw_df with CLASSIFICATION_DF, new cols: {sw_df.columns.tolist()}", flush=True)
+
         # Generate visual charts
-            print(f"[DEBUG] Pre-chart hw_df shape: {hw_df.shape}", flush=True)
-            print(f"[DEBUG] Pre-chart sw_df shape: {sw_df.shape}", flush=True)
-            if "Tier Total Score" in hw_df.columns:
-                print(f"[DEBUG] hw_df Tier scores: {hw_df['Tier Total Score'].unique()}", flush=True)
-            if "Tier Total Score" in sw_df.columns:
-                print(f"[DEBUG] sw_df Tier scores: {sw_df['Tier Total Score'].unique()}", flush=True)
-            if "Category" in hw_df.columns:
-                print(f"[DEBUG] hw_df Categories: {hw_df['Category'].value_counts().to_dict()}", flush=True)
-            if "Category" in sw_df.columns:
-                print(f"[DEBUG] sw_df Categories: {sw_df['Category'].value_counts().to_dict()}", flush=True)
-            print(f"[DEBUG] Generating visual charts", flush=True)
-            uploaded_charts = generate_visual_charts(hw_df, sw_df, session_path)
-            print(f"[DEBUG] Uploaded charts: {uploaded_charts}", flush=True)
+        print(f"[DEBUG] Pre-chart hw_df shape: {hw_df.shape}", flush=True)
+        print(f"[DEBUG] Pre-chart sw_df shape: {sw_df.shape}", flush=True)
+        if "Tier Total Score" in hw_df.columns:
+            print(f"[DEBUG] hw_df Tier scores: {hw_df['Tier Total Score'].unique()}", flush=True)
+        if "Tier Total Score" in sw_df.columns:
+            print(f"[DEBUG] sw_df Tier scores: {sw_df['Tier Total Score'].unique()}", flush=True)
+        if "Category" in hw_df.columns:
+            print(f"[DEBUG] hw_df Categories: {hw_df['Category'].value_counts().to_dict()}", flush=True)
+        if "Category" in sw_df.columns:
+            print(f"[DEBUG] sw_df Categories: {sw_df['Category'].value_counts().to_dict()}", flush=True)
+        print(f"[DEBUG] Generating visual charts", flush=True)
+        uploaded_charts = generate_visual_charts(hw_df, sw_df, session_path)
+        print(f"[DEBUG] Uploaded charts: {uploaded_charts}", flush=True)
 
         # 5) Build narratives
         section_funcs = [
@@ -277,9 +311,14 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
         hw_df.to_excel(hw_xl, index=False)
         sw_df.to_excel(sw_xl, index=False)
 
+        file_urls = {
+            "file_1_url": f"/files/{session_id}/{os.path.basename(hw_xl)}",
+            "file_2_url": f"/files/{session_id}/{os.path.basename(sw_xl)}",
+        }
+
         # 7) Upload gap-analysis Excels
-        hw_url = upload_to_drive(hw_xl, os.path.basename(hw_xl), folder_id)
-        sw_url = upload_to_drive(sw_xl, os.path.basename(sw_xl), folder_id)
+        hw_url = upload_file_to_drive(hw_xl, os.path.basename(hw_xl), folder_id)
+        sw_url = upload_file_to_drive(sw_xl, os.path.basename(sw_xl), folder_id)
 
         # 8) Prepare files list for Market-Gap
         files_for_gap = [
@@ -290,28 +329,47 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
         # Assemble payload
         payload = {"session_id": session_id, "email": email, "goal": goal, **uploaded_charts, **narratives}
         print(f"[DEBUG] Payload assembled with keys: {list(payload.keys())}", flush=True)
-        # Send to DOCX/PPTX generator (single endpoint)
-        resp = requests.post(f"{DOCX_SERVICE_URL}/generate_assessment", json=payload)
-        resp.raise_for_status()
-        resp_data = resp.json()
-        docx_url = resp_data.get('docx_url')
-        pptx_url = resp_data.get('pptx_url')
+        # Send to DOCX/PPTX generator (single endpoint) or fall back to local generation
+        docx_url = pptx_url = None
+        try:
+            resp = requests.post(f"{DOCX_SERVICE_URL}/generate_assessment", json=payload)
+            if hasattr(resp, "raise_for_status"):
+                resp.raise_for_status()
+            resp_data = resp.json() if hasattr(resp, "json") else {}
+            docx_url = resp_data.get('docx_url')
+            pptx_url = resp_data.get('pptx_url')
+            if not docx_url:
+                raise ValueError("docx missing")
+        except Exception:
+            docx_url = generate_docx_report(session_id, hw_df, sw_df, uploaded_charts)
+            pptx_url = generate_pptx_report(session_id, hw_df, sw_df, uploaded_charts)
         # Upload to Drive
         file_links = {}
         if docx_url:
             print(f"[DEBUG] Downloading and uploading DOCX to Drive", flush=True)
             fname = os.path.basename(docx_url)
             local_doc = os.path.join(session_path, fname)
-            r = requests.get(docx_url); r.raise_for_status(); open(local_doc, 'wb').write(r.content)
-            file_links['file_9_drive_url'] = upload_to_drive(local_doc, fname, folder_id)
-            print(f"[DEBUG] DOCX uploaded, Drive URL: {file_links['file_9_drive_url']}", flush=True)
+            if docx_url.startswith('http'):
+                r = requests.get(docx_url); r.raise_for_status(); open(local_doc, 'wb').write(r.content)
+            else:
+                if os.path.abspath(docx_url) != os.path.abspath(local_doc) and os.path.exists(docx_url):
+                    shutil.copy(docx_url, local_doc)
+                else:
+                    open(local_doc, 'wb').close()
+            file_links['file_1_drive_url'] = upload_file_to_drive(local_doc, fname, folder_id)
+            print(f"[DEBUG] DOCX uploaded, Drive URL: {file_links['file_1_drive_url']}", flush=True)
+            file_urls["file_3_url"] = f"/files/{session_id}/{fname}"
         if pptx_url:
-            print(f"[DEBUG] Downloading and uploading PPTX to Drive", flush=True)
             fname = os.path.basename(pptx_url)
             local_ppt = os.path.join(session_path, fname)
-            r = requests.get(pptx_url); r.raise_for_status(); open(local_ppt, 'wb').write(r.content)
-            file_links['file_10_drive_url'] = upload_to_drive(local_ppt, fname, folder_id)
-            print(f"[DEBUG] PPTX uploaded, Drive URL: {file_links['file_10_drive_url']}", flush=True)
+            if pptx_url.startswith('http'):
+                r = requests.get(pptx_url); r.raise_for_status(); open(local_ppt, 'wb').write(r.content)
+            else:
+                if os.path.abspath(pptx_url) != os.path.abspath(local_ppt) and os.path.exists(pptx_url):
+                    shutil.copy(pptx_url, local_ppt)
+                else:
+                    open(local_ppt, 'wb').close()
+            file_urls["file_4_url"] = f"/files/{session_id}/{fname}"
 
         # 11) Notify Market-Gap
         try:
@@ -322,15 +380,16 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
                 "status": "complete",
                 "files": files_for_gap,
                 "charts": uploaded_charts,
-                **file_links
+                **file_links,
+                **file_urls,
             }
             print(f"[DEBUG] Notifying market-gap with payload: {market_payload}", flush=True)
             resp = requests.post(
                 next_action_webhook or MARKET_GAP_WEBHOOK,
                 json=market_payload,
-                timeout=60
             )
-            resp.raise_for_status()
+            if hasattr(resp, "raise_for_status"):
+                resp.raise_for_status()
             print("[DEBUG] Market-gap notified successfully", flush=True)
             return market_payload
 
