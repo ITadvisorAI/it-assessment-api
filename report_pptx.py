@@ -35,14 +35,19 @@ def generate_pptx_report(session_id, hw_df, sw_df, chart_paths):
         template_path = os.path.join(
             TEMPLATES_DIR, "IT_Current_Status_Executive_Report_Template.pptx"
         )
-        prs = Presentation(template_path)
+        prs = Presentation(template_path) if os.path.exists(template_path) else Presentation()
+        # remove template slides to start clean
+        while len(prs.slides) > 0:
+            rId = prs.slides._sldIdLst[0].rId
+            prs.part.drop_rel(rId)
+            del prs.slides._sldIdLst[0]
         title_slide_layout = prs.slide_layouts[0]
         content_layout = prs.slide_layouts[1]
         blank_layout = prs.slide_layouts[6]
 
         # Title Slide
         slide = prs.slides.add_slide(title_slide_layout)
-        slide.shapes.title.text = "IT Infrastructure Executive Summary"
+        slide.shapes.title.text = "Executive Summary"
         slide.placeholders[1].text = f"Session ID: {session_id}"
 
         # HW Summary
