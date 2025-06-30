@@ -196,10 +196,10 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
             lower = {c.lower() for c in df_temp.columns}
             file_type = f.get('type', '').lower()
 
-           if file_type == 'asset_inventory' and (
-               {'device id', 'device name'} <= lower
-               or {'server id', 'server name'} <= lower
-           ):
+            if file_type == 'asset_inventory' and (
+               {'device id', 'device name'} <= lower or
+               {'server id', 'server name'} <= lower
+            ):
               hw_df = pd.concat([hw_df, df_temp], ignore_index=True)
               print(f"[DEBUG] Appended to hw_df via broadened detector, new shape {hw_df.shape}", flush=True)
           elif file_type == 'asset_inventory' and {'app id', 'app name'} <= lower:
