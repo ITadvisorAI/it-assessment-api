@@ -188,57 +188,70 @@ def ai_narrative(section_name: str, summary: dict) -> str:
         )
     return resp.choices[0].message.content.strip()
 
-def generate_assessment(session_id: str,
-                        email: str,
-                        goal: str,
-                        files: list,
-                        next_action_webhook: str,
-                        folder_id: str) -> dict:
+def generate_assessment(session_id: str, email: str, goal: str, files: list, next_action_webhook: str, folder_id: str) -> dict:
     print(f"[DEBUG] Starting generate_assessment for session {session_id}", flush=True)
     try:
         hw_df, sw_df = pd.DataFrame(), pd.DataFrame()
-        session_path = f"./{session_id}"
-        os.makedirs(session_path, exist_ok=True)
+        session_path = f"./{session_id}"; os.makedirs(session_path, exist_ok=True)
         print(f"[DEBUG] Session path created: {session_path}", flush=True)
-
-        # 1) Download & categorize files
+        # Download files
         for f in files:
             name, url = f['file_name'], f['file_url']
-            local_path = os.path.join(session_path, name)
-            r = requests.get(url); r.raise_for_status()
-            open(local_path, 'wb').write(r.content)
-            df_temp = pd.read_excel(local_path)
+            print(f"[DEBUG] Downloading {name} from {url}", flush=True)
+            local = os.path.join(session_path, name)
+            r = requests.get(url); r.raise_for_status(); open(local, 'wb').write(r.content)
+            print(f"[DEBUG] Downloaded and wrote {name}", flush=True)
+            df_temp = pd.read_excel(local)
+            print(f"[DEBUG] Read {name} into DataFrame with shape {df_temp.shape}", flush=True)
             cols = set(c.lower() for c in df_temp.columns)
-            ft = f.get('type', '').lower()
-            if ft == 'asset_inventory' and {'device id', 'device name'} <= cols:
+            file_type = f.get('type', '').lower()
+            if file_type == 'asset_inventory' and {'device id', 'device name'} <= cols:
                 hw_df = pd.concat([hw_df, df_temp], ignore_index=True)
-            elif ft == 'asset_inventory' and {'app id', 'app name'} <= cols:
+                print(f"[DEBUG] Appended to hw_df, new shape {hw_df.shape}", flush=True)
+            elif file_type == 'asset_inventory' and {'app id', 'app name'} <= cols:
                 sw_df = pd.concat([sw_df, df_temp], ignore_index=True)
-            elif ft in ('hardware_inventory', 'asset_hardware'):
+                print(f"[DEBUG] Appended to sw_df, new shape {sw_df.shape}", flush=True)
+            elif file_type in ('hardware_inventory', 'asset_hardware'):
                 hw_df = pd.concat([hw_df, df_temp], ignore_index=True)
+                print(f"[DEBUG] Appended to hw_df via type fallback, new shape {hw_df.shape}", flush=True)
             else:
                 sw_df = pd.concat([sw_df, df_temp], ignore_index=True)
-
-        # 2) Enrich & classify hardware
+                print(f"[DEBUG] Appended to sw_df via fallback, new shape {sw_df.shape}", flush=True)
+        # Enrich & classify
         if not hw_df.empty:
+            print(f"[DEBUG] Running hardware replacements on hw_df", flush=True)
             hw_df = suggest_hw_replacements(pd.concat([HW_BASE_DF, hw_df], ignore_index=True))
+            print(f"[DEBUG] Hardware after replacements shape {hw_df.shape}", flush=True)
             if "Tier Total Score" not in hw_df.columns:
                 hw_df["Tier Total Score"] = 5
-            hw_df = hw_df.merge(CLASSIFICATION_DF, how='left',
-                                 left_on='Tier Total Score', right_on='Score')
-
-        # 3) Enrich & classify software
+                print(f"[DEBUG] Injected default Tier Total Score into hw_df", flush=True)
+            if "Tier Total Score" in hw_df.columns:
+                hw_df = hw_df.merge(
+                    CLASSIFICATION_DF,
+                    how='left',
+                    left_on='Tier Total Score',
+                    right_on='Score'
+                )
+                print(f"[DEBUG] Merged hw_df with CLASSIFICATION_DF, new cols: {hw_df.columns.tolist()}", flush=True)
         if not sw_df.empty:
+            print(f"[DEBUG] Running software replacements on sw_df", flush=True)
             sw_df = suggest_sw_replacements(pd.concat([SW_BASE_DF, sw_df], ignore_index=True))
+            print(f"[DEBUG] Software after replacements shape {sw_df.shape}", flush=True)
             if "Tier Total Score" not in sw_df.columns:
                 sw_df["Tier Total Score"] = 5
-            sw_df = sw_df.merge(CLASSIFICATION_DF, how='left',
-                                 left_on='Tier Total Score', right_on='Score')
-
-        # 4) Generate & upload charts
+                print(f"[DEBUG] Injected default Tier Total Score into sw_df", flush=True)
+            if "Tier Total Score" in sw_df.columns:
+                sw_df = sw_df.merge(
+                    CLASSIFICATION_DF,
+                    how='left',
+                    left_on='Tier Total Score',
+                    right_on='Score'
+                )
+                print(f"[DEBUG] Merged sw_df with CLASSIFICATION_DF, new cols: {sw_df.columns.tolist()}", flush=True)
+        # Generate visual charts
         print(f"[DEBUG] Generating visual charts", flush=True)
         uploaded_charts = generate_visual_charts(hw_df, sw_df, session_path)
-        print(f"[DEBUG] Charts generated: {uploaded_charts}", flush=True)
+        print(f"[DEBUG] Uploaded charts: {uploaded_charts}", flush=True)
 
         # 5) Build narratives
         section_funcs = [
@@ -273,32 +286,31 @@ def generate_assessment(session_id: str,
             {"file_name": os.path.basename(sw_xl), "drive_url": sw_url}
         ]
 
-        # 9) Send to DOCX/PPTX generator
-        payload = {
-            "session_id": session_id,
-            "email": email,
-            "goal": goal,
-            **uploaded_charts,
-            **narratives
-        }
+        # Assemble payload
+        payload = {"session_id": session_id, "email": email, "goal": goal, **uploaded_charts, **narratives}
+        print(f"[DEBUG] Payload assembled with keys: {list(payload.keys())}", flush=True)
+        # Send to DOCX/PPTX generator (single endpoint)
         resp = requests.post(f"{DOCX_SERVICE_URL}/generate_assessment", json=payload)
         resp.raise_for_status()
         resp_data = resp.json()
-        docx_url = resp_data.get("docx_url")
-        pptx_url = resp_data.get("pptx_url")
-
-        # 10) Upload DOCX & PPTX to Drive
+        docx_url = resp_data.get('docx_url')
+        pptx_url = resp_data.get('pptx_url')
+        # Upload to Drive
         file_links = {}
         if docx_url:
-            local_doc = os.path.join(session_path, os.path.basename(docx_url))
-            r = requests.get(docx_url); r.raise_for_status()
-            open(local_doc, "wb").write(r.content)
-            file_links["file_9_drive_url"] = upload_to_drive(local_doc, os.path.basename(docx_url), folder_id)
+            print(f"[DEBUG] Downloading and uploading DOCX to Drive", flush=True)
+            fname = os.path.basename(docx_url)
+            local_doc = os.path.join(session_path, fname)
+            r = requests.get(docx_url); r.raise_for_status(); open(local_doc, 'wb').write(r.content)
+            file_links['file_9_drive_url'] = upload_to_drive(local_doc, fname, folder_id)
+            print(f"[DEBUG] DOCX uploaded, Drive URL: {file_links['file_9_drive_url']}", flush=True)
         if pptx_url:
-            local_ppt = os.path.join(session_path, os.path.basename(pptx_url))
-            r = requests.get(pptx_url); r.raise_for_status()
-            open(local_ppt, "wb").write(r.content)
-            file_links["file_10_drive_url"] = upload_to_drive(local_ppt, os.path.basename(pptx_url), folder_id)
+            print(f"[DEBUG] Downloading and uploading PPTX to Drive", flush=True)
+            fname = os.path.basename(pptx_url)
+            local_ppt = os.path.join(session_path, fname)
+            r = requests.get(pptx_url); r.raise_for_status(); open(local_ppt, 'wb').write(r.content)
+            file_links['file_10_drive_url'] = upload_to_drive(local_ppt, fname, folder_id)
+            print(f"[DEBUG] PPTX uploaded, Drive URL: {file_links['file_10_drive_url']}", flush=True)
 
         # 11) Notify Market-Gap
         try:
