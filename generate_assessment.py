@@ -202,10 +202,10 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
             ):
               hw_df = pd.concat([hw_df, df_temp], ignore_index=True)
               print(f"[DEBUG] Appended to hw_df via broadened detector, new shape {hw_df.shape}", flush=True)
-          elif file_type == 'asset_inventory' and {'app id', 'app name'} <= lower:
+            elif file_type == 'asset_inventory' and {'app id', 'app name'} <= lower:
               sw_df = pd.concat([sw_df, df_temp], ignore_index=True)
-             print(f"[DEBUG] Appended to sw_df (software), new shape {sw_df.shape}", flush=True)
-         else:
+              print(f"[DEBUG] Appended to sw_df (software), new shape {sw_df.shape}", flush=True)
+        else:
             sw_df = pd.concat([sw_df, df_temp], ignore_index=True)
             print(f"[DEBUG] Appended to sw_df via fallback, new shape {sw_df.shape}", flush=True)
         # Enrich & classify
