@@ -193,20 +193,21 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
             print(f"[DEBUG] Downloaded and wrote {name}", flush=True)
             df_temp = pd.read_excel(local)
             print(f"[DEBUG] Read {name} into DataFrame with shape {df_temp.shape}", flush=True)
-            cols = set(c.lower() for c in df_temp.columns)
+            lower = {c.lower() for c in df_temp.columns}
             file_type = f.get('type', '').lower()
-            if file_type == 'asset_inventory' and {'device id', 'device name'} <= cols:
-                hw_df = pd.concat([hw_df, df_temp], ignore_index=True)
-                print(f"[DEBUG] Appended to hw_df, new shape {hw_df.shape}", flush=True)
-            elif file_type == 'asset_inventory' and {'app id', 'app name'} <= cols:
-                sw_df = pd.concat([sw_df, df_temp], ignore_index=True)
-                print(f"[DEBUG] Appended to sw_df, new shape {sw_df.shape}", flush=True)
-            elif file_type in ('hardware_inventory', 'asset_hardware'):
-                hw_df = pd.concat([hw_df, df_temp], ignore_index=True)
-                print(f"[DEBUG] Appended to hw_df via type fallback, new shape {hw_df.shape}", flush=True)
-            else:
-                sw_df = pd.concat([sw_df, df_temp], ignore_index=True)
-                print(f"[DEBUG] Appended to sw_df via fallback, new shape {sw_df.shape}", flush=True)
+
+           if file_type == 'asset_inventory' and (
+               {'device id', 'device name'} <= lower
+               or {'server id', 'server name'} <= lower
+           ):
+              hw_df = pd.concat([hw_df, df_temp], ignore_index=True)
+              print(f"[DEBUG] Appended to hw_df via broadened detector, new shape {hw_df.shape}", flush=True)
+          elif file_type == 'asset_inventory' and {'app id', 'app name'} <= lower:
+              sw_df = pd.concat([sw_df, df_temp], ignore_index=True)
+             print(f"[DEBUG] Appended to sw_df (software), new shape {sw_df.shape}", flush=True)
+         else:
+            sw_df = pd.concat([sw_df, df_temp], ignore_index=True)
+            print(f"[DEBUG] Appended to sw_df via fallback, new shape {sw_df.shape}", flush=True)
         # Enrich & classify
         if not hw_df.empty:
             print(f"[DEBUG] Running hardware replacements on hw_df", flush=True)
