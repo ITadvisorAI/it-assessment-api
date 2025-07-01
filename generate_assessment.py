@@ -36,6 +36,24 @@ CLASSIFICATION_DF = pd.read_excel(os.path.join(TEMPLATES_DIR, "ClassificationTie
 # Category names from the classification matrix
 CATEGORY_COLUMNS = ['Scalability', 'Security', 'Reliability', 'Performance', 'Cost-Effectiveness']
 
+def find_id_column(df, candidates):
+    """
+    Given a DataFrame and a list of candidate header names (case‐insensitive),
+    return the first matching actual column name, or any column ending in 'id',
+    or None if nothing is found.
+    """
+    # map lowercase→actual names
+    lower_map = {col.lower(): col for col in df.columns}
+    # 1) explicit candidates
+    for cand in candidates:
+        if cand.lower() in lower_map:
+            return lower_map[cand.lower()]
+    # 2) any column that ends with 'id'
+    for col in df.columns:
+        if col.lower().endswith("id"):
+            return col
+    return None
+
 def compute_tier_score(row):
     # 1) Scalability: based on RAM and storage
     ram = row.get("RAM (GB)", 0)
@@ -317,10 +335,14 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
                 print(f"[DEBUG] Fallback appended to sw_df, new shape {sw_df.shape}", flush=True)
                 
         # Enrich & classify
-        if not hw_df.empty:
-            print(f"[DEBUG] Running hardware replacements on hw_df", flush=True)
+
         # 1) enrich with market data
-            real_hw = hw_df[hw_df["Device ID"].notna()]
+            hw_candidates = ["Name", "Device Name", "Asset ID", "Asset Name","Server Name", "Server ID", "Device ID", "ID"]
+            hw_id_col = find_id_column(hw_df, hw_candidates)
+            if hw_id_col:
+            real_hw = hw_df[hw_df[hw_id_col].notna()]
+            else:
+            real_hw = hw_df.copy()
             hw_df = suggest_hw_replacements(real_hw)
             print(f"[DEBUG] Hardware after replacements shape {hw_df.shape}", flush=True)
 
@@ -343,7 +365,12 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
         if not sw_df.empty:
             print(f"[DEBUG] Running software replacements on sw_df", flush=True)
         # 1) enrich with market data
-            real_sw = sw_df[sw_df["App ID"].notna()]
+            sw_candidates = ["Name", "Application Name", "Software", "Software Name","App ID", "Application", "App Name"]
+            sw_id_col = find_id_column(sw_df, sw_candidates)
+            if sw_id_col:
+                real_sw = sw_df[sw_df[sw_id_col].notna()]
+            else:
+                real_sw = sw_df.copy()
             sw_df = suggest_sw_replacements(real_sw)
             print(f"[DEBUG] Software after replacements shape {sw_df.shape}", flush=True)
 
