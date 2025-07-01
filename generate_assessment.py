@@ -304,10 +304,17 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
             print(f"[DEBUG] Read {name} into DataFrame with shape {df_temp.shape}", flush=True)
             
             # — Override based on filename keywords —
-            if any(k in name_lower for k in ("server", "device", "asset")):
-                file_type = "hardware"
-            elif any(k in name_lower for k in ("application", "app", "software")):
-                file_type = "software"
+            # initialise file_type from the metadata and lowercase filename
+            file_type = f.get("type", "").lower()
+            name_lower = name.lower()
+
+            # (optional) also rebuild your header‐map if you need it later
+            lower = {c.lower(): c for c in df_temp.columns}
+
+             if any(k in name_lower for k in ("server", "device", "asset")):
+                 file_type = "hardware"
+             elif any(k in name_lower for k in ("application", "app", "software")):
+                 file_type = "software"
 
             # — Classify into hardware or software using flexible ID‐column detection —
             hw_candidates = [
