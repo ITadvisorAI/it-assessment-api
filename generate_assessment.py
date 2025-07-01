@@ -175,8 +175,7 @@ def build_section_20_next_steps(hw_df, sw_df):
 
 def ai_narrative(section_name: str, summary: dict) -> str:
     print(f"[DEBUG] ai_narrative called for section {section_name} with summary keys: {list(summary.keys())}", flush=True)
-    if not (os.getenv("OPENAI_API_KEY") or getattr(openai, "api_key", None)):
-        return ""
+    
     # chunk large lists to avoid rate limits
     list_items = [(k, v) for k, v in summary.items() if isinstance(v, list)]
     if list_items:
@@ -348,7 +347,15 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
             print(f"[DEBUG] hw_df Categories: {hw_df['Category'].value_counts().to_dict()}", flush=True)
         if "Category" in sw_df.columns:
             print(f"[DEBUG] sw_df Categories: {sw_df['Category'].value_counts().to_dict()}", flush=True)
+        # … debug prints …
         print(f"[DEBUG] Generating visual charts", flush=True)
+        # ensure the pie-chart code sees "Tier" and "Status"
+        hw_df = hw_df.rename(columns={"Tier Total Score": "Tier"})
+        sw_df = sw_df.rename(columns={"Tier Total Score": "Tier"})
+        if "Availability" in hw_df.columns:
+            hw_df["Status"] = hw_df["Availability"]
+        if "Availability" in sw_df.columns:
+            sw_df["Status"] = sw_df["Availability"]
         uploaded_charts = generate_visual_charts(hw_df, sw_df, session_path)
         print(f"[DEBUG] Uploaded charts: {uploaded_charts}", flush=True)
 
