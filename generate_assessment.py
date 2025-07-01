@@ -140,14 +140,15 @@ def build_section_12_legacy_technical_debt(hw_df, sw_df):
     return {"legacy_issues": []}
 
 def build_section_13_obsolete_risk(hw_df, sw_df):
-    risks = []
+    # only take the first 100 high-risk rows for each
+    risks = {}
     if "Tier Total Score" in hw_df.columns:
-        high_risk_hw = hw_df[hw_df["Tier Total Score"] < 30]
-        risks.append({"hardware": high_risk_hw.to_dict(orient="records")})
+        high_risk_hw = hw_df[hw_df["Tier Total Score"] < 30].head(100)
+        risks["hardware_risks"] = high_risk_hw.to_dict(orient="records")
     if "Tier Total Score" in sw_df.columns:
-        high_risk_sw = sw_df[sw_df["Tier Total Score"] < 30]
-        risks.append({"software": high_risk_sw.to_dict(orient="records")})
-    return {"risks": risks}
+        high_risk_sw = sw_df[sw_df["Tier Total Score"] < 30].head(100)
+        risks["software_risks"] = high_risk_sw.to_dict(orient="records")
+    return risks
 
 def build_section_14_cloud_migration(hw_df, sw_df):
     return {"cloud_migration": []}
