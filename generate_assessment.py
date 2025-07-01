@@ -1,6 +1,23 @@
 import os
 import json
 import pandas as pd
+import requests
+import openai
+import shutil
+from market_lookup import suggest_hw_replacements, suggest_sw_replacements
+from visualization import generate_visual_charts
+from drive_utils import upload_to_drive
+
+# Backwards compatibility for tests expecting `upload_file_to_drive`
+upload_file_to_drive = upload_to_drive
+from docx import Document
+from pptx import Presentation
+from pptx.util import Inches
+from report_docx import generate_docx_report
+from report_pptx import generate_pptx_report
+
+TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
+OUTPUT_DIR = "temp_sessions"
 
 # Load classification matrix (cached at import time)
 CLASSIFICATION_DF = pd.read_excel(os.path.join(TEMPLATES_DIR, "ClassificationTier.xlsx"))
@@ -43,24 +60,6 @@ def compute_tier_score(row):
     diffs = (CLASSIFICATION_DF["Score"] - avg).abs()
     best = diffs.idxmin()
     return int(CLASSIFICATION_DF.at[best, "Score"])
-
-import requests
-import openai
-import shutil
-from market_lookup import suggest_hw_replacements, suggest_sw_replacements
-from visualization import generate_visual_charts
-from drive_utils import upload_to_drive
-
-# Backwards compatibility for tests expecting `upload_file_to_drive`
-upload_file_to_drive = upload_to_drive
-from docx import Document
-from pptx import Presentation
-from pptx.util import Inches
-from report_docx import generate_docx_report
-from report_pptx import generate_pptx_report
-
-TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
-OUTPUT_DIR = "temp_sessions"
 
 # ──────────────────────────────────────────────
 # Cache templates at import time (only once)
