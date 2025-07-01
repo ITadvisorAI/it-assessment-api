@@ -387,9 +387,9 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
         chart_paths = generate_visual_charts(hw_df, sw_df, session_path)
         uploaded_charts = {}
         for chart_name, chart_path in chart_paths.items():
-        chart_url = upload_file_to_drive(chart_path, os.path.basename(chart_path), folder_id)
-        uploaded_charts[f"{chart_name}_url"] = chart_url
-        print(f"[DEBUG] Uploaded charts: {uploaded_charts}", flush=True)
+            chart_url = upload_file_to_drive(chart_path, os.path.basename(chart_path), folder_id)
+            uploaded_charts[f"{chart_name}_url"] = chart_url
+            print(f"[DEBUG] Uploaded charts: {uploaded_charts}", flush=True)
 
         # 5) Build narratives
         section_funcs = [
