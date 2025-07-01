@@ -311,26 +311,26 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
         print(f"[DEBUG] Merged hw_df with CLASSIFICATION_DF, new cols: {hw_df.columns.tolist()}", flush=True)
     
         if not sw_df.empty:
-        print(f"[DEBUG] Running software replacements on sw_df", flush=True)
+            print(f"[DEBUG] Running software replacements on sw_df", flush=True)
         # 1) enrich with market data
-        sw_df = suggest_sw_replacements(pd.concat([SW_BASE_DF, sw_df], ignore_index=True))
-        print(f"[DEBUG] Software after replacements shape {sw_df.shape}", flush=True)
+            sw_df = suggest_sw_replacements(pd.concat([SW_BASE_DF, sw_df], ignore_index=True))
+            print(f"[DEBUG] Software after replacements shape {sw_df.shape}", flush=True)
 
         # 2) compute true Tier Total Score for inventory rows
-        sw_df["Tier Total Score"] = sw_df.apply(compute_tier_score, axis=1)
+            sw_df["Tier Total Score"] = sw_df.apply(compute_tier_score, axis=1)
 
         # 3) default any new (market-only) rows to 5
-        sw_df["Tier Total Score"] = sw_df["Tier Total Score"].fillna(5)
-        print(f"[DEBUG] Final Tier Total Score values: {sw_df['Tier Total Score'].unique()}", flush=True)
+            sw_df["Tier Total Score"] = sw_df["Tier Total Score"].fillna(5)
+            print(f"[DEBUG] Final Tier Total Score values: {sw_df['Tier Total Score'].unique()}", flush=True)
 
         # 4) merge in classification details
-        sw_df = sw_df.merge(
-            CLASSIFICATION_DF,
-            how="left",
-            left_on="Tier Total Score",
-            right_on="Score"
-        )
-        print(f"[DEBUG] Merged sw_df with CLASSIFICATION_DF, new cols: {sw_df.columns.tolist()}", flush=True)
+            sw_df = sw_df.merge(
+                CLASSIFICATION_DF,
+                how="left",
+                left_on="Tier Total Score",
+                right_on="Score"
+            )
+            print(f"[DEBUG] Merged sw_df with CLASSIFICATION_DF, new cols: {sw_df.columns.tolist()}", flush=True)
 
         # Generate visual charts
         print(f"[DEBUG] Pre-chart hw_df shape: {hw_df.shape}", flush=True)
