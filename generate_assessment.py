@@ -19,6 +19,17 @@ from report_pptx import generate_pptx_report
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
 OUTPUT_DIR = "temp_sessions"
 
+# Service endpoints
+DOCX_SERVICE_URL = os.getenv("DOCX_SERVICE_URL", "https://docx-generator-api.onrender.com")
+MARKET_GAP_WEBHOOK = os.getenv("MARKET_GAP_WEBHOOK", "https://market-gap-analysis.onrender.com/start_market_gap")
+
+# Cache templates at import time (only once)
+print("[DEBUG] Loading template spreadsheets into memory...", flush=True)
+HW_BASE_DF = pd.read_excel(os.path.join(TEMPLATES_DIR, "HWGapAnalysis.xlsx"))
+SW_BASE_DF = pd.read_excel(os.path.join(TEMPLATES_DIR, "SWGapAnalysis.xlsx"))
+CLASSIFICATION_DF = pd.read_excel(os.path.join(TEMPLATES_DIR, "ClassificationTier.xlsx"))
+print("[DEBUG] Templates cached successfully", flush=True)
+
 # Load classification matrix (cached at import time)
 CLASSIFICATION_DF = pd.read_excel(os.path.join(TEMPLATES_DIR, "ClassificationTier.xlsx"))
 
@@ -60,19 +71,6 @@ def compute_tier_score(row):
     diffs = (CLASSIFICATION_DF["Score"] - avg).abs()
     best = diffs.idxmin()
     return int(CLASSIFICATION_DF.at[best, "Score"])
-
-# ──────────────────────────────────────────────
-# Cache templates at import time (only once)
-print("[DEBUG] Loading template spreadsheets into memory...", flush=True)
-HW_BASE_DF = pd.read_excel(os.path.join(TEMPLATES_DIR, "HWGapAnalysis.xlsx"))
-SW_BASE_DF = pd.read_excel(os.path.join(TEMPLATES_DIR, "SWGapAnalysis.xlsx"))
-CLASSIFICATION_DF = pd.read_excel(os.path.join(TEMPLATES_DIR, "ClassificationTier.xlsx"))
-print("[DEBUG] Templates cached successfully", flush=True)
-# ──────────────────────────────────────────────
-
-# Service endpoints
-DOCX_SERVICE_URL = os.getenv("DOCX_SERVICE_URL", "https://docx-generator-api.onrender.com")
-MARKET_GAP_WEBHOOK = os.getenv("MARKET_GAP_WEBHOOK", "https://market-gap-analysis.onrender.com/start_market_gap")
 
 # Section builder functions
 
