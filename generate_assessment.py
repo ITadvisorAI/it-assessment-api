@@ -282,10 +282,17 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
         print(f"[DEBUG] Session path created: {session_path}", flush=True)
 
         uploaded_charts = {}
+        # ensure file_links always exists, even if no DOCX/PPTX are generated
+        file_links = {}
 
         # Download files
         for f in files:
             name, url = f['file_name'], f['file_url']
+            # skip anything that isn’t an inventory Excel sheet
+            file_type = f.get("type", "").lower()
+            if file_type not in ("asset_inventory", "hardware", "software"):
+                print(f"[DEBUG] Skipping non-inventory file {name} (type={file_type})", flush=True)
+            continue
             print(f"[DEBUG] Downloading {name} from {url}", flush=True)
             local = os.path.join(session_path, name)
             if url.startswith("http"):
@@ -458,23 +465,6 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
         hw_url = upload_file_to_drive(hw_xl, os.path.basename(hw_xl), folder_id)
         sw_url = upload_file_to_drive(sw_xl, os.path.basename(sw_xl), folder_id)
 
-        # 8) Prepare files list for Market-Gap: include Excels and current-state docs
-        files_for_gap = [
-            {"file_name": os.path.basename(hw_xl), "drive_url": hw_url},
-            {"file_name": os.path.basename(sw_xl), "drive_url": sw_url},
-        ]
-        # append the current-state DOCX & PPTX if they were uploaded
-        if "file_1_drive_url" in file_links:
-            files_for_gap.append({
-            "file_name": os.path.basename(local_doc),
-            "drive_url": file_links["file_1_drive_url"]
-        })
-        if "file_2_drive_url" in file_links:
-            files_for_gap.append({
-            "file_name": os.path.basename(local_ppt),
-            "drive_url": file_links["file_2_drive_url"]
-        })
-
         # Assemble payload
         payload = {"session_id": session_id, "email": email, "goal": goal, **uploaded_charts, **narratives}
         print(f"[DEBUG] Payload assembled with keys: {list(payload.keys())}", flush=True)
@@ -523,6 +513,23 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
             print(f"[DEBUG] PPTX uploaded, Drive URL: {file_links['file_2_drive_url']}", flush=True)
             file_urls["file_4_url"] = f"/files/{session_id}/{fname}"
 
+            # 8) Prepare files list for Market-Gap: include Excels and current-state docs
+            files_for_gap = [
+                {"file_name": os.path.basename(hw_xl), "drive_url": hw_url},
+                {"file_name": os.path.basename(sw_xl), "drive_url": sw_url},
+            ]
+            # append the current-state DOCX & PPTX if they were uploaded
+            if "file_1_drive_url" in file_links:
+                files_for_gap.append({
+                "file_name": os.path.basename(local_doc),
+                "drive_url": file_links["file_1_drive_url"]
+            })
+            if "file_2_drive_url" in file_links:
+                files_for_gap.append({
+                "file_name": os.path.basename(local_ppt),
+                "drive_url": file_links["file_2_drive_url"]
+            })
+        
         # 11) Notify Market-Gap
         try:
             market_payload = {
