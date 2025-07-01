@@ -93,8 +93,13 @@ def build_section_2_overview(hw_df, sw_df):
     }
 
 def build_section_3_inventory_hardware(hw_df, sw_df):
-    return {"hardware_items": hw_df.to_dict(orient="records")}
-
+    counts = hw_df.get("Category", pd.Series()).value_counts().to_dict()
+    top5 = hw_df.get("Device Name", pd.Series()).value_counts().head(5).to_dict()
+    return {
+        "total_devices": len(hw_df),
+        "by_category": counts,
+        "top_5_devices": top5
+    }
 def build_section_4_inventory_software(hw_df, sw_df):
     counts = sw_df.get("Category", pd.Series()).value_counts().to_dict()
     top5 = sw_df.get("App Name", pd.Series()).value_counts().head(5).to_dict()
