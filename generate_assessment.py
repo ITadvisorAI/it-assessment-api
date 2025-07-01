@@ -515,17 +515,21 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
             print(f"[DEBUG] PPTX uploaded, Drive URL: {file_links['file_2_drive_url']}", flush=True)
             file_urls["file_4_url"] = f"/files/{session_id}/{fname}"
 
-            # 8) Dynamically upload *all* files in the session folder for Market-Gap
+            # 8) Collect and upload only XLSX/DOCX/PPTX for Market-Gap
             files_for_gap = []
             for fname in os.listdir(session_path):
                 local_path = os.path.join(session_path, fname)
+                # skip directories and any PNG/chart files
                 if not os.path.isfile(local_path):
                     continue
-            # upload every single file (Excel, DOCX, PPTX, PNG, etc.)
-                drive_url = upload_file_to_drive(local_path, fname, folder_id)
-                files_for_gap.append({"file_name": fname, "drive_url": drive_url})
-            print(f"[DEBUG] files_for_gap built with {len(files_for_gap)} items", flush=True)
-        
+                # only pick Excel, Word or PowerPoint
+                if not fname.lower().endswith((".xlsx", ".xls", ".docx", ".pptx")):
+                    continue
+        drive_url = upload_file_to_drive(local_path, fname, folder_id)
+        files_for_gap.append({"file_name": fname, "drive_url": drive_url})
+    print(f"[DEBUG] files_for_gap built with {len(files_for_gap)} items", flush=True)
+    
+                    
         # 11) Notify Market-Gap
         try:
             market_payload = {
