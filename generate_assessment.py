@@ -559,13 +559,3 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
     except Exception as e:
         import traceback; traceback.print_exc()
         return {"error": str(e)}
-
-def process_assessment(data: dict) -> dict:
-    return generate_assessment(
-        session_id=data.get("session_id", ""),
-        email=data.get("email", ""),
-        goal=data.get("goal", ""),
-        files=data.get("files", []),
-        next_action_webhook=data.get("next_action_webhook", ""),
-        folder_id=data.get("folder_id", "")
-    )
