@@ -500,6 +500,7 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
             file_links['file_1_drive_url'] = upload_file_to_drive(local_doc, fname, folder_id)
             print(f"[DEBUG] DOCX uploaded, Drive URL: {file_links['file_1_drive_url']}", flush=True)
             file_urls["file_3_url"] = f"/files/{session_id}/{fname}"
+            
         if pptx_url:
             fname = os.path.basename(pptx_url)
             local_ppt = os.path.join(session_path, fname)
@@ -525,9 +526,9 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
             # only pick Excel, Word or PowerPoint
             if not fname.lower().endswith((".xlsx", ".xls", ".docx", ".pptx")):
                 continue
-                drive_url = upload_file_to_drive(local_path, fname, folder_id)
-                files_for_gap.append({"file_name": fname, "drive_url": drive_url})
-            print(f"[DEBUG] files_for_gap built with {len(files_for_gap)} items", flush=True)
+            drive_url = upload_file_to_drive(local_path, fname, folder_id)
+            files_for_gap.append({"file_name": fname, "drive_url": drive_url})
+        print(f"[DEBUG] files_for_gap built with {len(files_for_gap)} items", flush=True)
                         
         # 11) Notify Market-Gap
         try:
