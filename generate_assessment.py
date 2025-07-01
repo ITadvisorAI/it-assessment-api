@@ -138,8 +138,7 @@ def build_section_6_lifecycle_status(hw_df, sw_df):
             "past_eol": int((eol <= now).sum()),
             "unknown": int(eol.isna().sum())
         }
-    else:
-        return {"active": 0, "past_eol": 0, "unknown": 0}
+    return {"active": 0, "past_eol": 0, "unknown": 0}
 
 def build_section_7_software_compliance(hw_df, sw_df):
     if "License Status" in sw_df.columns:
@@ -298,37 +297,39 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
                     dst.write(src.read())
             print(f"[DEBUG] Downloaded and wrote {name}", flush=True)
             df_temp = pd.read_excel(local)
+            
             # strip whitespace so our header matching works
             df_temp.columns = df_temp.columns.str.strip()
             print(f"[DEBUG] Cleaned columns: {df_temp.columns.tolist()}", flush=True)
             print(f"[DEBUG] Read {name} into DataFrame with shape {df_temp.shape}", flush=True)
-            lower = {c.lower() for c in df_temp.columns}
-            file_type = f.get('type', '').lower()
-            name_lower = name.lower()
-
+            
             # — Override based on filename keywords —
             if any(k in name_lower for k in ("server", "device", "asset")):
                 file_type = "hardware"
             elif any(k in name_lower for k in ("application", "app", "software")):
                 file_type = "software"
 
-            # — Classify into hardware or software —
-            if (
-                file_type in ("hardware", "asset_inventory") and (
-                    {"device id", "device name"}.issubset(lower)
-                    or {"server id", "server name"}.issubset(lower)
-                )
-            ) or file_type == "hardware":
+            # — Classify into hardware or software using flexible ID‐column detection —
+            hw_candidates = [
+                "Name","Device Name","Asset ID","Asset Name",
+                "Server Name","Server ID","Device ID","ID"
+            ]
+            sw_candidates = [
+                "Name","Application Name","Software","Software Name",
+                "App ID","Application","App Name"
+            ]
+
+            hw_id = find_id_column(df_temp, hw_candidates)
+            sw_id = find_id_column(df_temp, sw_candidates)
+
+            if file_type == "hardware" or (file_type == "asset_inventory" and hw_id):
                 hw_df = pd.concat([hw_df, df_temp], ignore_index=True)
                 print(f"[DEBUG] Appended to hw_df (hardware), new shape {hw_df.shape}", flush=True)
-            elif (
-                file_type in ("software", "asset_inventory") and (
-                    {"app id", "app name"}.issubset(lower)
-                    or {"application id", "application name"}.issubset(lower)
-                )
-            ) or file_type == "software":
+
+            elif file_type == "software" or (file_type == "asset_inventory" and sw_id):
                 sw_df = pd.concat([sw_df, df_temp], ignore_index=True)
                 print(f"[DEBUG] Appended to sw_df (software), new shape {sw_df.shape}", flush=True)
+
             else:
                 # Final fallback to software
                 sw_df = pd.concat([sw_df, df_temp], ignore_index=True)
@@ -340,9 +341,9 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
             hw_candidates = ["Name", "Device Name", "Asset ID", "Asset Name","Server Name", "Server ID", "Device ID", "ID"]
             hw_id_col = find_id_column(hw_df, hw_candidates)
             if hw_id_col:
-            real_hw = hw_df[hw_df[hw_id_col].notna()]
+                real_hw = hw_df[hw_df[hw_id_col].notna()]
             else:
-            real_hw = hw_df.copy()
+                real_hw = hw_df.copy()
             hw_df = suggest_hw_replacements(real_hw)
             print(f"[DEBUG] Hardware after replacements shape {hw_df.shape}", flush=True)
 
