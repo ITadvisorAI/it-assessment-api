@@ -525,11 +525,10 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
                 # only pick Excel, Word or PowerPoint
                 if not fname.lower().endswith((".xlsx", ".xls", ".docx", ".pptx")):
                     continue
-        drive_url = upload_file_to_drive(local_path, fname, folder_id)
-        files_for_gap.append({"file_name": fname, "drive_url": drive_url})
-    print(f"[DEBUG] files_for_gap built with {len(files_for_gap)} items", flush=True)
-    
-                    
+                drive_url = upload_file_to_drive(local_path, fname, folder_id)
+                files_for_gap.append({"file_name": fname, "drive_url": drive_url})
+                    print(f"[DEBUG] files_for_gap built with {len(files_for_gap)} items", flush=True)
+                        
         # 11) Notify Market-Gap
         try:
             market_payload = {
