@@ -81,7 +81,7 @@ def build_section_2_overview(hw_df, sw_df):
     total_devices = len(hw_df)
     total_applications = len(sw_df)
     scores = pd.to_numeric(hw_df.get("Tier Total Score", pd.Series()), errors="coerce")
-    healthy_devices = int((scores >= 75).sum())
+    healthy_devices = int((scores >= 4).sum())
     compliant_licenses = int((sw_df.get("License Status", pd.Series()) != "Expired").sum())
     return {
         "total_devices": total_devices,
@@ -112,7 +112,16 @@ def build_section_5_classification_distribution(hw_df, sw_df):
     return {"classification_distribution": dist}
 
 def build_section_6_lifecycle_status(hw_df, sw_df):
-    return {"lifecycle_status": []}
+    now = pd.Timestamp.now()
+    if "End of Life (EOL)" in hw_df.columns:
+        eol = pd.to_datetime(hw_df["End of Life (EOL)"], errors="coerce")
+        return {
+            "active": int((eol > now).sum()),
+            "past_eol": int((eol <= now).sum()),
+            "unknown": int(eol.isna().sum())
+        }
+    else:
+        return {"active": 0, "past_eol": 0, "unknown": 0}
 
 def build_section_7_software_compliance(hw_df, sw_df):
     if "License Status" in sw_df.columns:
@@ -123,16 +132,31 @@ def build_section_7_software_compliance(hw_df, sw_df):
     return {"compliant_count": compliant, "expired_count": expired}
 
 def build_section_8_security_posture(hw_df, sw_df):
-    return {"vulnerabilities": []}
+    if "Vulnerabilities" in hw_df.columns:
+        total = int(hw_df["Vulnerabilities"].fillna(0).sum())
+        by_severity = {}
+        if "Vulnerability Severity" in hw_df.columns:
+            by_severity = hw_df["Vulnerability Severity"].value_counts(dropna=True).to_dict()
+        return {"total_vulnerabilities": total, "by_severity": by_severity}
+    return {"total_vulnerabilities": 0, "by_severity": {}}
 
 def build_section_9_performance(hw_df, sw_df):
-    return {"performance_metrics": []}
+    metrics = {}
+    if "Throughput (Mbps)" in sw_df.columns:
+        metrics["avg_throughput_mbps"] = float(sw_df["Throughput (Mbps)"].mean())
+    if "Latency (ms)" in sw_df.columns:
+        metrics["avg_latency_ms"] = float(sw_df["Latency (ms)"].mean())
+    return metrics
 
 def build_section_10_reliability(hw_df, sw_df):
-    return {"reliability_metrics": []}
+    if "Uptime (%)" in sw_df.columns:
+        return {"avg_uptime_pct": float(sw_df["Uptime (%)"].mean())}
+    return {"avg_uptime_pct": None}
 
 def build_section_11_scalability(hw_df, sw_df):
-    return {"scalability_opportunities": []}
+    if "Max Users" in sw_df.columns:
+        return {"max_supported_users": int(sw_df["Max Users"].max())}
+    return {"max_supported_users": None}
 
 def build_section_12_legacy_technical_debt(hw_df, sw_df):
     return {"legacy_issues": []}
@@ -256,6 +280,9 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
                     dst.write(src.read())
             print(f"[DEBUG] Downloaded and wrote {name}", flush=True)
             df_temp = pd.read_excel(local)
+            # strip whitespace so our header matching works
+            df_temp.columns = df_temp.columns.str.strip()
+            print(f"[DEBUG] Cleaned columns: {df_temp.columns.tolist()}", flush=True)
             print(f"[DEBUG] Read {name} into DataFrame with shape {df_temp.shape}", flush=True)
             lower = {c.lower() for c in df_temp.columns}
             file_type = f.get('type', '').lower()
@@ -293,7 +320,8 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
         if not hw_df.empty:
             print(f"[DEBUG] Running hardware replacements on hw_df", flush=True)
         # 1) enrich with market data
-            hw_df = suggest_hw_replacements(pd.concat([HW_BASE_DF, hw_df], ignore_index=True))
+            real_hw = hw_df[hw_df["Device ID"].notna()]
+            hw_df = suggest_hw_replacements(real_hw)
             print(f"[DEBUG] Hardware after replacements shape {hw_df.shape}", flush=True)
 
         # 2) compute true Tier Total Score for inventory rows
@@ -315,7 +343,8 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
         if not sw_df.empty:
             print(f"[DEBUG] Running software replacements on sw_df", flush=True)
         # 1) enrich with market data
-            sw_df = suggest_sw_replacements(pd.concat([SW_BASE_DF, sw_df], ignore_index=True))
+            real_sw = sw_df[sw_df["App ID"].notna()]
+            sw_df = suggest_sw_replacements(real_sw)
             print(f"[DEBUG] Software after replacements shape {sw_df.shape}", flush=True)
 
         # 2) compute true Tier Total Score for inventory rows
@@ -354,7 +383,12 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
             hw_df["Status"] = hw_df["Availability"]
         if "Availability" in sw_df.columns:
             sw_df["Status"] = sw_df["Availability"]
-        uploaded_charts = generate_visual_charts(hw_df, sw_df, session_path)
+        
+        chart_paths = generate_visual_charts(hw_df, sw_df, session_path)
+        uploaded_charts = {}
+        for chart_name, chart_path in chart_paths.items():
+        chart_url = upload_file_to_drive(chart_path, os.path.basename(chart_path), folder_id)
+        uploaded_charts[f"{chart_name}_url"] = chart_url
         print(f"[DEBUG] Uploaded charts: {uploaded_charts}", flush=True)
 
         # 5) Build narratives
