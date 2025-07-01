@@ -1,6 +1,49 @@
 import os
 import json
 import pandas as pd
+
+# Load classification matrix (cached at import time)
+CLASSIFICATION_DF = pd.read_excel(os.path.join(TEMPLATES_DIR, "ClassificationTier.xlsx"))
+
+# Category names from the classification matrix
+CATEGORY_COLUMNS = ['Scalability', 'Security', 'Reliability', 'Performance', 'Cost-Effectiveness']
+
+def compute_tier_score(row):
+    # 1) Scalability: based on RAM and storage
+    ram = row.get("RAM (GB)", 0)
+    storage = row.get("Storage Capacity (Raw & Usable)", 0)
+    # assume max observed values are RAM=512 GB, Storage=100 TB → normalize to 0–100
+    scalability_score = min(5, (ram / 512 * 100) + (storage / (100 * 1024) * 100))
+
+    # 2) Security: based on presence of compliance tags
+    tags = str(row.get("Compliance Tags", ""))
+    security_score = 5 if any(t.strip() in tags for t in ("PCI", "HIPAA", "SOC2")) else 3
+
+    # 3) Reliability: based on Warranty Expiry
+    reliab = 0
+    if pd.notna(row.get("Warranty Expiry Date")):
+        expiry = pd.to_datetime(row["Warranty Expiry Date"])
+        reliab = 5 if expiry >= pd.Timestamp.today() else 3
+
+    # 4) Performance: based on CPU specs (e.g. Xeon)
+    cpu = str(row.get("Processor / CPU Specs", "")).lower()
+    performance_score = 5 if "xeon" in cpu else 4
+
+    # 5) Cost-Effectiveness: based on age or EOL proximity
+    cost = 0
+    if pd.notna(row.get("End of Life (EOL)")):
+        eol = pd.to_datetime(row["End of Life (EOL)"])
+        days_past = (pd.Timestamp.today() - eol).days
+        cost = max(0, 5 - days_past / 365 * 20)  # lose 20 points per year past EOL
+    else:
+        cost = 5
+
+    # average and snap to nearest tier
+    avg = (scalability_score + security_score + reliab + performance_score + cost) / 5
+    diffs = (CLASSIFICATION_DF["Score"] - avg).abs()
+    best = diffs.idxmin()
+    return int(CLASSIFICATION_DF.at[best, "Score"])
+
 import requests
 import openai
 import shutil
@@ -247,34 +290,47 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
         # Enrich & classify
         if not hw_df.empty:
             print(f"[DEBUG] Running hardware replacements on hw_df", flush=True)
+        # 1) enrich with market data
             hw_df = suggest_hw_replacements(pd.concat([HW_BASE_DF, hw_df], ignore_index=True))
             print(f"[DEBUG] Hardware after replacements shape {hw_df.shape}", flush=True)
-            if "Tier Total Score" not in hw_df.columns:
-                hw_df["Tier Total Score"] = 5
-                print(f"[DEBUG] Injected default Tier Total Score into hw_df", flush=True)
-            if "Tier Total Score" in hw_df.columns:
-                hw_df = hw_df.merge(
-                    CLASSIFICATION_DF,
-                    how='left',
-                    left_on='Tier Total Score',
-                    right_on='Score'
-                )
-                print(f"[DEBUG] Merged hw_df with CLASSIFICATION_DF, new cols: {hw_df.columns.tolist()}", flush=True)
+
+        # 2) compute true Tier Total Score for inventory rows
+            hw_df["Tier Total Score"] = hw_df.apply(compute_tier_score, axis=1)
+
+        # 3) default any new (market-only) rows to 5
+            hw_df["Tier Total Score"] = hw_df["Tier Total Score"].fillna(5)
+            print(f"[DEBUG] Final Tier Total Score values: {hw_df['Tier Total Score'].unique()}", flush=True)
+
+        # 4) merge in classification details
+        hw_df = hw_df.merge(
+            CLASSIFICATION_DF,
+            how="left",
+            left_on="Tier Total Score",
+            right_on="Score"
+        )
+        print(f"[DEBUG] Merged hw_df with CLASSIFICATION_DF, new cols: {hw_df.columns.tolist()}", flush=True)
+    
         if not sw_df.empty:
-            print(f"[DEBUG] Running software replacements on sw_df", flush=True)
-            sw_df = suggest_sw_replacements(pd.concat([SW_BASE_DF, sw_df], ignore_index=True))
-            print(f"[DEBUG] Software after replacements shape {sw_df.shape}", flush=True)
-            if "Tier Total Score" not in sw_df.columns:
-                sw_df["Tier Total Score"] = 5
-                print(f"[DEBUG] Injected default Tier Total Score into sw_df", flush=True)
-            if "Tier Total Score" in sw_df.columns:
-                sw_df = sw_df.merge(
-                    CLASSIFICATION_DF,
-                    how='left',
-                    left_on='Tier Total Score',
-                    right_on='Score'
-                )
-                print(f"[DEBUG] Merged sw_df with CLASSIFICATION_DF, new cols: {sw_df.columns.tolist()}", flush=True)
+        print(f"[DEBUG] Running software replacements on sw_df", flush=True)
+        # 1) enrich with market data
+        sw_df = suggest_sw_replacements(pd.concat([SW_BASE_DF, sw_df], ignore_index=True))
+        print(f"[DEBUG] Software after replacements shape {sw_df.shape}", flush=True)
+
+        # 2) compute true Tier Total Score for inventory rows
+        sw_df["Tier Total Score"] = sw_df.apply(compute_tier_score, axis=1)
+
+        # 3) default any new (market-only) rows to 5
+        sw_df["Tier Total Score"] = sw_df["Tier Total Score"].fillna(5)
+        print(f"[DEBUG] Final Tier Total Score values: {sw_df['Tier Total Score'].unique()}", flush=True)
+
+        # 4) merge in classification details
+        sw_df = sw_df.merge(
+            CLASSIFICATION_DF,
+            how="left",
+            left_on="Tier Total Score",
+            right_on="Score"
+        )
+        print(f"[DEBUG] Merged sw_df with CLASSIFICATION_DF, new cols: {sw_df.columns.tolist()}", flush=True)
 
         # Generate visual charts
         print(f"[DEBUG] Pre-chart hw_df shape: {hw_df.shape}", flush=True)
