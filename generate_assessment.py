@@ -458,11 +458,22 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
         hw_url = upload_file_to_drive(hw_xl, os.path.basename(hw_xl), folder_id)
         sw_url = upload_file_to_drive(sw_xl, os.path.basename(sw_xl), folder_id)
 
-        # 8) Prepare files list for Market-Gap
+        # 8) Prepare files list for Market-Gap: include Excels and current-state docs
         files_for_gap = [
             {"file_name": os.path.basename(hw_xl), "drive_url": hw_url},
-            {"file_name": os.path.basename(sw_xl), "drive_url": sw_url}
+            {"file_name": os.path.basename(sw_xl), "drive_url": sw_url},
         ]
+        # append the current-state DOCX & PPTX if they were uploaded
+        if "file_1_drive_url" in file_links:
+            files_for_gap.append({
+            "file_name": os.path.basename(local_doc),
+            "drive_url": file_links["file_1_drive_url"]
+        })
+        if "file_2_drive_url" in file_links:
+            files_for_gap.append({
+            "file_name": os.path.basename(local_ppt),
+            "drive_url": file_links["file_2_drive_url"]
+        })
 
         # Assemble payload
         payload = {"session_id": session_id, "email": email, "goal": goal, **uploaded_charts, **narratives}
@@ -507,6 +518,9 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
                     shutil.copy(pptx_url, local_ppt)
                 else:
                     open(local_ppt, 'wb').close()
+            # upload PPTX so gap-analysis can consume it
+            file_links['file_2_drive_url'] = upload_file_to_drive(local_ppt, fname, folder_id)
+            print(f"[DEBUG] PPTX uploaded, Drive URL: {file_links['file_2_drive_url']}", flush=True)
             file_urls["file_4_url"] = f"/files/{session_id}/{fname}"
 
         # 11) Notify Market-Gap
