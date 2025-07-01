@@ -311,10 +311,10 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
             # (optional) also rebuild your header‐map if you need it later
             lower = {c.lower(): c for c in df_temp.columns}
 
-             if any(k in name_lower for k in ("server", "device", "asset")):
-                 file_type = "hardware"
-             elif any(k in name_lower for k in ("application", "app", "software")):
-                 file_type = "software"
+            if any(k in name_lower for k in ("server", "device", "asset")):
+                file_type = "hardware"
+            elif any(k in name_lower for k in ("application", "app", "software")):
+                file_type = "software"
 
             # — Classify into hardware or software using flexible ID‐column detection —
             hw_candidates = [
