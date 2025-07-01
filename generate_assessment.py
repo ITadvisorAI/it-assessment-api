@@ -209,9 +209,6 @@ def build_recommendations(hw_df, sw_df):
     sw_recs = suggest_sw_replacements(sw_df).head(3).to_dict(orient="records") if not sw_df.empty else []
     return {"hardware_replacements": hw_recs, "software_replacements": sw_recs}
 
-def build_section_20_next_steps(hw_df, sw_df):
-    return build_recommendations(hw_df, sw_df)
-
 def ai_narrative(section_name: str, summary: dict) -> str:
     print(f"[DEBUG] ai_narrative called for section {section_name} with summary keys: {list(summary.keys())}", flush=True)
     
@@ -458,15 +455,6 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
         hw_df.to_excel(hw_xl, index=False)
         sw_df.to_excel(sw_xl, index=False)
 
-        file_urls = {
-            "file_1_url": f"/files/{session_id}/{os.path.basename(hw_xl)}",
-            "file_2_url": f"/files/{session_id}/{os.path.basename(sw_xl)}",
-        }
-
-        # 7) Upload gap-analysis Excels
-        hw_url = upload_file_to_drive(hw_xl, os.path.basename(hw_xl), folder_id)
-        sw_url = upload_file_to_drive(sw_xl, os.path.basename(sw_xl), folder_id)
-
         # Assemble payload
         payload = {"session_id": session_id, "email": email, "goal": goal, **uploaded_charts, **narratives}
         print(f"[DEBUG] Payload assembled with keys: {list(payload.keys())}", flush=True)
@@ -484,38 +472,7 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
         except Exception:
             docx_url = generate_docx_report(session_id, hw_df, sw_df, uploaded_charts)
             pptx_url = generate_pptx_report(session_id, hw_df, sw_df, uploaded_charts)
-        # Upload to Drive
-        file_links = {}
-        if docx_url:
-            print(f"[DEBUG] Downloading and uploading DOCX to Drive", flush=True)
-            fname = os.path.basename(docx_url)
-            local_doc = os.path.join(session_path, fname)
-            if docx_url.startswith('http'):
-                r = requests.get(docx_url); r.raise_for_status(); open(local_doc, 'wb').write(r.content)
-            else:
-                if os.path.abspath(docx_url) != os.path.abspath(local_doc) and os.path.exists(docx_url):
-                    shutil.copy(docx_url, local_doc)
-                else:
-                    open(local_doc, 'wb').close()
-            file_links['file_1_drive_url'] = upload_file_to_drive(local_doc, fname, folder_id)
-            print(f"[DEBUG] DOCX uploaded, Drive URL: {file_links['file_1_drive_url']}", flush=True)
-            file_urls["file_3_url"] = f"/files/{session_id}/{fname}"
-            
-        if pptx_url:
-            fname = os.path.basename(pptx_url)
-            local_ppt = os.path.join(session_path, fname)
-            if pptx_url.startswith('http'):
-                r = requests.get(pptx_url); r.raise_for_status(); open(local_ppt, 'wb').write(r.content)
-            else:
-                if os.path.abspath(pptx_url) != os.path.abspath(local_ppt) and os.path.exists(pptx_url):
-                    shutil.copy(pptx_url, local_ppt)
-                else:
-                    open(local_ppt, 'wb').close()
-            # upload PPTX so gap-analysis can consume it
-            file_links['file_2_drive_url'] = upload_file_to_drive(local_ppt, fname, folder_id)
-            print(f"[DEBUG] PPTX uploaded, Drive URL: {file_links['file_2_drive_url']}", flush=True)
-            file_urls["file_4_url"] = f"/files/{session_id}/{fname}"
-
+        
         # 8) Collect and upload only XLSX/DOCX/PPTX for Market-Gap
         files_for_gap = []
         for fname in os.listdir(session_path):
@@ -539,8 +496,6 @@ def generate_assessment(session_id: str, email: str, goal: str, files: list, nex
                 "status": "complete",
                 "files": files_for_gap,
                 "charts": uploaded_charts,
-                **file_links,
-                **file_urls,
             }
             print(f"[DEBUG] Notifying market-gap with payload: {market_payload}", flush=True)
             resp = requests.post(
