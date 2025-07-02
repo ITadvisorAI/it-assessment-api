@@ -209,6 +209,9 @@ def build_recommendations(hw_df, sw_df):
     sw_recs = suggest_sw_replacements(sw_df).head(3).to_dict(orient="records") if not sw_df.empty else []
     return {"hardware_replacements": hw_recs, "software_replacements": sw_recs}
 
+def build_section_20_next_steps(hw_df, sw_df):
+    return build_recommendations(hw_df, sw_df)
+
 def ai_narrative(section_name: str, summary: dict) -> str:
     print(f"[DEBUG] ai_narrative called for section {section_name} with summary keys: {list(summary.keys())}", flush=True)
     
